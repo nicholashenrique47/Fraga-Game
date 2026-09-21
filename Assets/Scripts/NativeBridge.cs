@@ -1,3 +1,14 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:3bd5f97a067f47f4e316f4605d2f70dca91b5bc14f8293234f0ad320bdfade80
-size 356
+using UnityEngine;
+using System.Runtime.InteropServices;
+
+public class NativeBridge : MonoBehaviour
+{
+    [DllImport("FragaNative")]
+    public static extern int InitFragaEngine();
+
+    void Start()
+    {
+        int ano = InitFragaEngine();
+        Debug.Log($"[SISTEMA HÍBRIDO] O motor C++ respondeu com sucesso. Ano atual: {ano}");
+    }
+}

@@ -1,3 +1,200 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:cff1866a6033a4e963aeaad08f4e1baf264985b71dd79d2f8d8a59a19524cda7
-size 8251
+using UnityEngine;
+
+/// EagleSystem: Aguias raras que sobrevoam e cacam coelhos automaticamente.
+/// Dropar Penas (item novo) quando passam perto do jogador.
+public class EagleSystem : MonoBehaviour
+{
+    [Header("Config")]
+    public int maxEagles = 2;
+    public float swoopSpeed = 8f;
+    public float cruiseHeight = 12f;
+    public float huntCooldown = 30f;
+    
+    [Header("Dependencies")]
+    public FaunaManager faunaManager;
+    public Transform playerTransform;
+    public InventoryAdvanced inventory;
+    
+    private Vector3[] eaglePositions;
+    private float[] eagleHuntTimers;
+    private GameObject[] eagleInstances;
+    private bool[] isSwooping;
+    private Vector3[] swoopTargets;
+    
+    private void Awake()
+    {
+        eaglePositions = new Vector3[maxEagles];
+        eagleHuntTimers = new float[maxEagles];
+        eagleInstances = new GameObject[maxEagles];
+        isSwooping = new bool[maxEagles];
+        swoopTargets = new Vector3[maxEagles];
+        
+        SpawnEagles();
+    }
+    
+    private void SpawnEagles()
+    {
+        GameObject eagleParent = new GameObject("Eagle_Instances");
+        eagleParent.transform.SetParent(transform);
+        
+        for(int i=0; i<maxEagles; i++)
+        {
+            eaglePositions[i] = new Vector3(
+                Random.Range(20f, 80f),
+                cruiseHeight,
+                Random.Range(20f, 80f)
+            );
+            eagleHuntTimers[i] = Random.Range(10f, huntCooldown);
+            
+            eagleInstances[i] = CreateEagleModel(eagleParent.transform);
+        }
+    }
+    
+    private GameObject CreateEagleModel(Transform parent)
+    {
+        GameObject eagle = new GameObject("Eagle");
+        eagle.transform.SetParent(parent);
+        
+        // Body
+        GameObject body = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+        body.transform.SetParent(eagle.transform);
+        body.transform.localPosition = Vector3.zero;
+        body.transform.localScale = new Vector3(0.15f, 0.1f, 0.25f);
+        body.transform.localRotation = Quaternion.Euler(90, 0, 0);
+        Renderer bodyR = body.GetComponent<Renderer>();
+        bodyR.material.color = new Color(0.35f, 0.2f, 0.1f); // Castanho escuro
+        
+        // Left wing (grande)
+        GameObject wingL = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        wingL.transform.SetParent(eagle.transform);
+        wingL.transform.localPosition = new Vector3(-0.3f, 0, 0);
+        wingL.transform.localScale = new Vector3(0.4f, 0.015f, 0.12f);
+        Renderer wlR = wingL.GetComponent<Renderer>();
+        wlR.material.color = new Color(0.3f, 0.18f, 0.08f);
+        
+        // Right wing
+        GameObject wingR = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        wingR.transform.SetParent(eagle.transform);
+        wingR.transform.localPosition = new Vector3(0.3f, 0, 0);
+        wingR.transform.localScale = new Vector3(0.4f, 0.015f, 0.12f);
+        Renderer wrR = wingR.GetComponent<Renderer>();
+        wrR.material.color = new Color(0.3f, 0.18f, 0.08f);
+        
+        foreach(Collider c in eagle.GetComponentsInChildren<Collider>()) Destroy(c);
+        
+        return eagle;
+    }
+    
+    private void Update()
+    {
+        float dt = Time.deltaTime;
+        
+        for(int i=0; i<maxEagles; i++)
+        {
+            if (eagleInstances[i] == null) continue;
+            
+            eagleHuntTimers[i] -= dt;
+            
+            if (isSwooping[i])
+            {
+                // Mergulhar em direcao ao alvo
+                Vector3 dir = (swoopTargets[i] - eaglePositions[i]).normalized;
+                eaglePositions[i] += dir * swoopSpeed * dt;
+                
+                float dist = Vector3.Distance(eaglePositions[i], swoopTargets[i]);
+                if (dist < 1.5f)
+                {
+                    // Tentativa de apanhar coelho
+                    if (faunaManager != null)
+                    {
+                        float[] rx = faunaManager.GetRabbitPosX();
+                        float[] ry = faunaManager.GetRabbitPosY();
+                        for(int r=0; r<faunaManager.maxRabbits; r++)
+                        {
+                            float dx = rx[r] - swoopTargets[i].x;
+                            float dz = ry[r] - swoopTargets[i].z;
+                            if (dx*dx + dz*dz < 4f)
+                            {
+                                faunaManager.CatchRabbit(r);
+                                Debug.Log("[Eagle] Aguia cacou um coelho!");
+                                
+                                // Dropar pena perto do jogador
+                                if (LootManager.Instance != null && playerTransform != null)
+                                {
+                                    float pdist = Vector3.Distance(playerTransform.position, swoopTargets[i]);
+                                    if (pdist < 20f)
+                                    {
+                                        LootManager.Instance.DropItem(114, 1, swoopTargets[i]); // Pena de Aguia
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    
+                    isSwooping[i] = false;
+                    eagleHuntTimers[i] = huntCooldown;
+                }
+            }
+            else
+            {
+                // Sobrevoar em circulos largos
+                float angle = Time.time * 0.3f + i * Mathf.PI;
+                eaglePositions[i].x += Mathf.Cos(angle) * 2f * dt;
+                eaglePositions[i].z += Mathf.Sin(angle) * 2f * dt;
+                eaglePositions[i].y = cruiseHeight + Mathf.Sin(Time.time * 0.2f + i) * 1.5f;
+                
+                // Manter dentro dos limites
+                eaglePositions[i].x = Mathf.Clamp(eaglePositions[i].x, 5, 95);
+                eaglePositions[i].z = Mathf.Clamp(eaglePositions[i].z, 5, 95);
+                
+                // Tentar iniciar caca
+                if (eagleHuntTimers[i] <= 0 && faunaManager != null)
+                {
+                    float[] rx = faunaManager.GetRabbitPosX();
+                    float[] ry = faunaManager.GetRabbitPosY();
+                    float closest = float.MaxValue;
+                    int target = -1;
+                    
+                    for(int r=0; r<faunaManager.maxRabbits; r++)
+                    {
+                        float dx = rx[r] - eaglePositions[i].x;
+                        float dz = ry[r] - eaglePositions[i].z;
+                        float d = dx*dx + dz*dz;
+                        if (d < closest && rx[r] > 0)
+                        {
+                            closest = d;
+                            target = r;
+                        }
+                    }
+                    
+                    if (target >= 0 && closest < 25f * 25f)
+                    {
+                        swoopTargets[i] = new Vector3(rx[target], 0.5f, ry[target]);
+                        isSwooping[i] = true;
+                    }
+                }
+            }
+            
+            // Wing flap animation
+            float wingFlap = Mathf.Sin(Time.time * 4f + i) * 10f;
+            if (eagleInstances[i].transform.childCount >= 3)
+            {
+                eagleInstances[i].transform.GetChild(1).localRotation = Quaternion.Euler(0, 0, wingFlap);
+                eagleInstances[i].transform.GetChild(2).localRotation = Quaternion.Euler(0, 0, -wingFlap);
+            }
+            
+            // Update visual position
+            Vector3 moveDir = eaglePositions[i] - eagleInstances[i].transform.position;
+            if (moveDir.sqrMagnitude > 0.01f)
+            {
+                Quaternion lookRot = Quaternion.LookRotation(moveDir.normalized);
+                // Calcula banking (roll) baseado na curvatura
+                float banking = isSwooping[i] ? 15f : 35f; 
+                Quaternion bankRot = Quaternion.Euler(0, 0, banking);
+                eagleInstances[i].transform.rotation = Quaternion.Slerp(eagleInstances[i].transform.rotation, lookRot * bankRot, Time.deltaTime * 4f);
+            }
+            eagleInstances[i].transform.position = eaglePositions[i];
+        }
+    }
+}

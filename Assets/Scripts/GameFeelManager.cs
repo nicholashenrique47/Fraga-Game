@@ -1,3 +1,24 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:25f9afce2f6dcd6f37ea63a48baf9f144ab04e537c892a2bfa6599b871537bed
-size 542
+using UnityEngine;
+using System.Collections;
+
+public class GameFeelManager : MonoBehaviour
+{
+    public static GameFeelManager Instance;
+    
+    private void Awake()
+    {
+        if (Instance == null) Instance = this;
+    }
+    
+    public void TriggerHitstop(float duration = 0.05f)
+    {
+        StartCoroutine(HitstopRoutine(duration));
+    }
+    
+    private IEnumerator HitstopRoutine(float duration)
+    {
+        Time.timeScale = 0.1f;
+        yield return new WaitForSecondsRealtime(duration);
+        Time.timeScale = 1f;
+    }
+}
