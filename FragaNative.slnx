@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="FragaNative/FragaNative.vcxproj" Id="ac7d17d3-ef0f-4e26-8710-ab6d6867c988" />
+</Solution>
