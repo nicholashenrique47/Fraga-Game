@@ -80,8 +80,16 @@ public class GameManager : MonoBehaviour
         flowFieldYPtr = flowFieldYHandle.AddrOfPinnedObject();
         intFieldPtr = intFieldHandle.AddrOfPinnedObject();
         queuePtr = queueHandle.AddrOfPinnedObject();
+    }
 
-        // Agora o GameManager fica à espera de "ContinueGame" ou "StartNewGame".
+    private void Start()
+    {
+        MainMenuManager menu = FindAnyObjectByType<MainMenuManager>();
+        if (menu == null)
+        {
+            Debug.Log("[GameManager] Cena sem MainMenuManager detectada. Inicializando mundo automaticamente!");
+            StartNewGame(mapSeed);
+        }
     }
 
     public void ContinueGame()
@@ -109,12 +117,21 @@ public class GameManager : MonoBehaviour
         GenerateMapGrid(mapDataPtr, mapWidth, mapHeight, mapSeed);
         Debug.Log($"[GameManager] Novo Mundo (C++) gerado com a Seed: {mapSeed}");
 
-        if (playerTransform != null) playerTransform.position = new Vector3(mapWidth/2f, 1f, mapHeight/2f);
+        if (playerTransform != null)
+        {
+            float spawnY = TerrainMeshGenerator.GetTerrainHeight(mapWidth / 2f, mapHeight / 2f) + 1.0f;
+            playerTransform.position = new Vector3(mapWidth / 2f, spawnY, mapHeight / 2f);
+            var pc = playerTransform.GetComponent<PlayerController>();
+            if (pc != null) pc.SnapToGround();
+        }
         
         // Spawn de um companheiro proceduralmente perto das ruinas
         if (companionPrefab != null)
         {
-            Vector3 companionPos = new Vector3(mapWidth/2f + 5f, 1f, mapHeight/2f + 5f);
+            float compX = mapWidth / 2f + 5f;
+            float compZ = mapHeight / 2f + 5f;
+            float compY = TerrainMeshGenerator.GetTerrainHeight(compX, compZ) + 1.0f;
+            Vector3 companionPos = new Vector3(compX, compY, compZ);
             Instantiate(companionPrefab, companionPos, Quaternion.identity);
             Debug.Log("[GameManager] Companheiro spawnado nas ruínas.");
         }
@@ -242,14 +259,35 @@ public class GameManager : MonoBehaviour
             SanitySystem s = playerTransform.GetComponent<SanitySystem>();
             if (s != null)
             {
-                s.sanity = 20f;
-                s.oil = 20f;
+                s.sanity = 100f;
+                s.oil = 100f;
+            }
+            PlayerStatus ps = playerTransform.GetComponent<PlayerStatus>();
+            if (ps != null)
+            {
+                ps.Revive();
             }
         }
 
-        // Resetar efeitos cinematicos de morte
+        // Renasce no amanhecer seguro (08:00 AM) para nao reaparecer no breu da noite
+        DayNightCycle dnc = FindAnyObjectByType<DayNightCycle>();
+        if (dnc != null)
+        {
+            dnc.currentTime = 8.0f;
+        }
+
+        // Limpa ameacas e Vultos imediatos num raio de 40m
+        if (vultoManager != null && playerTransform != null)
+        {
+            vultoManager.ClearNearbyVultos(playerTransform.position, 40f);
+        }
+
+        // Resetar efeitos cinematográficos de morte
         PostProcessingManager ppManager = FindAnyObjectByType<PostProcessingManager>();
         if (ppManager != null) ppManager.ResetAllEffects();
+
+        UIManager uiManager = FindAnyObjectByType<UIManager>();
+        if (uiManager != null) uiManager.HideDeathScreen();
 
         Debug.Log("[GameManager] O Jogador ressuscitou e a simulacao continuou!");
     }

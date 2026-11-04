@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 public class WeatherSystem : MonoBehaviour
 {
@@ -37,10 +37,12 @@ public class WeatherSystem : MonoBehaviour
     public AudioClip thunderClip;
     private float lightningTimer = 0f;
 
+    private int cachedSampleRate = 48000;
+    private System.Random sysRand = new System.Random();
     private BiomeManager biomeManager;
 
     // Controlador de material global (afeta o FoliageSway.shader)
-    private float currentWindSpeed;
+    public float currentWindSpeed;
     private float targetWindSpeed;
     
     // Variaveis de sintese de audio
@@ -51,7 +53,21 @@ public class WeatherSystem : MonoBehaviour
 
     private void Start()
     {
+        if (dayNightCycle == null) dayNightCycle = FindAnyObjectByType<DayNightCycle>();
+        if (playerTransform == null)
+        {
+            var p = GameObject.FindWithTag("Player");
+            if (p != null) playerTransform = p.transform;
+            else
+            {
+                var pc = FindAnyObjectByType<PlayerController>();
+                if (pc != null) playerTransform = pc.transform;
+            }
+        }
+        if (playerStatus == null) playerStatus = FindAnyObjectByType<PlayerStatus>();
+
         biomeManager = FindAnyObjectByType<BiomeManager>();
+        cachedSampleRate = AudioSettings.outputSampleRate;
         currentWindSpeed = baseWindSpeed;
         targetWindSpeed = baseWindSpeed;
         
@@ -258,7 +274,7 @@ public class WeatherSystem : MonoBehaviour
         }
     }
 
-        private void SyncToShader()
+    private void SyncToShader()
     {
         Shader.SetGlobalFloat("_GlobalWindSpeed", currentWindSpeed);
         // Aplica o vento extremo ao shader de foliage
@@ -266,6 +282,12 @@ public class WeatherSystem : MonoBehaviour
         float swayAmount = 0.05f + (currentWindSpeed * 0.08f);
         Shader.SetGlobalFloat("_SwaySpeed", swaySpeed);
         Shader.SetGlobalFloat("_SwayAmount", swayAmount);
+        
+        // Wetness Dinamico (The Forest Style): aumenta quando chove ou ha tempestade
+        float targetWetness = (isRaining || rainIntensity > 0.1f) ? 1.0f : 0.0f;
+        float currentWetness = Shader.GetGlobalFloat("_GlobalRainWetness");
+        float newWetness = Mathf.Lerp(currentWetness, targetWetness, Time.deltaTime * 0.5f);
+        Shader.SetGlobalFloat("_GlobalRainWetness", newWetness);
     }
 
     private void UpdateWeatherState()
@@ -329,18 +351,18 @@ public class WeatherSystem : MonoBehaviour
             emF.rateOverTime = Mathf.Lerp(emF.rateOverTime.constant, targetFireflies, Time.deltaTime);
         }
 
-        // 3. Nevoeiro global (Fog)
+        // 3. Nevoeiro global (Fog) - Calibrado The Forest (Luminoso, atmosférico e nunca preto)
         if (dayNightCycle != null)
         {
-            float targetFogDensity = 0.02f;
+            float targetFogDensity = 0.0035f; // Suave estilo The Forest (visibilidade ampla e cristalina)
             
-            if (dayNightCycle.currentTime > 22f || dayNightCycle.currentTime < 6f) targetFogDensity = 0.04f;
-            if (isRaining) targetFogDensity += rainIntensity * 0.05f;
-            if (isFoggy) targetFogDensity = 0.12f; // Nevoeiro intenso
+            if (dayNightCycle.currentTime > 22f || dayNightCycle.currentTime < 5.5f) targetFogDensity = 0.0065f;
+            if (isRaining) targetFogDensity += rainIntensity * 0.004f;
+            if (isFoggy) targetFogDensity = 0.012f; // Nevoeiro moderado apenas quando explicitamente foggy
 
             if (biomeManager != null && !isFoggy) targetFogDensity *= biomeManager.GetFogDensity();
 
-            RenderSettings.fogDensity = Mathf.Lerp(RenderSettings.fogDensity, targetFogDensity, Time.deltaTime * 0.1f);
+            RenderSettings.fogDensity = Mathf.Lerp(RenderSettings.fogDensity, targetFogDensity, Time.deltaTime * 0.2f);
             
             // Penalidade de Sanidade durante o Nevoeiro
             if (isFoggy && playerStatus != null)
@@ -348,7 +370,35 @@ public class WeatherSystem : MonoBehaviour
                 SanitySystem sanity = playerStatus.GetComponent<SanitySystem>();
                 if (sanity != null) sanity.sanity -= Time.deltaTime * 0.5f; // Dreno extra de Sanidade
             }
-            RenderSettings.fogColor = Color.Lerp(RenderSettings.fogColor, isRaining ? new Color(0.2f, 0.2f, 0.2f) : new Color(0.1f, 0.1f, 0.15f), Time.deltaTime);
+
+            // COR DO FOG THE FOREST:
+            // De dia: azul-celeste luminoso e claro (0.72f, 0.82f, 0.90f)
+            // Ao amanhecer/entardecer: dourado suave (0.82f, 0.70f, 0.58f)
+            // De noite: luar azulado perfeitamente visivel (0.22f, 0.28f, 0.40f)
+            // Chuva: cinza prateado suave (0.55f, 0.62f, 0.70f)
+            Color targetFogColor;
+            float ct = dayNightCycle.currentTime;
+            if (isRaining)
+            {
+                targetFogColor = new Color(0.55f, 0.62f, 0.70f);
+            }
+            else if (ct >= 6f && ct <= 18f)
+            {
+                // Pleno dia The Forest
+                targetFogColor = new Color(0.72f, 0.82f, 0.90f);
+            }
+            else if ((ct >= 4.5f && ct < 6f) || (ct > 18f && ct <= 19.5f))
+            {
+                // Alvorada / Crepúsculo dourado
+                targetFogColor = new Color(0.82f, 0.70f, 0.58f);
+            }
+            else
+            {
+                // Noite misteriosa mas nítida
+                targetFogColor = new Color(0.22f, 0.28f, 0.40f);
+            }
+
+            RenderSettings.fogColor = Color.Lerp(RenderSettings.fogColor, targetFogColor, Time.deltaTime * 0.5f);
         }
 
         // 4. Neve
@@ -431,7 +481,7 @@ public class WeatherSystem : MonoBehaviour
             return;
         }
 
-        int sampleRate = AudioSettings.outputSampleRate;
+        int sampleRate = cachedSampleRate > 0 ? cachedSampleRate : 48000;
         float RC = 1.0f / (currentWindLowPass * 2f * Mathf.PI);
         float dt = 1.0f / sampleRate;
         float alpha = dt / (RC + dt);
@@ -440,8 +490,8 @@ public class WeatherSystem : MonoBehaviour
 
         for (int i = 0; i < data.Length; i += channels)
         {
-            // Gerar ruido branco puro
-            float noise = Random.Range(-1f, 1f);
+            // Ruido branco puro seguro para thread de audio
+            float noise = (float)(sysRand.NextDouble() * 2.0 - 1.0);
             
             // Filtro Low-Pass IIR Simples para o efeito "whoosh"
             float filteredNoise = lastSample + alpha * (noise - lastSample);

@@ -1,9 +1,9 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 public class EquipmentSystem : MonoBehaviour
 {
     [Header("Dependencies")]
-    public Transform playerHandTransform; // Onde a arma é instanciada
+    public Transform playerHandTransform; // Onde a arma Ã© instanciada
     public PlayerStatus playerStatus;
     public InventoryAdvanced inventory;
     
@@ -23,7 +23,7 @@ public class EquipmentSystem : MonoBehaviour
     private HapticManager hapticCache;
     private AudioManager audioCache;
 
-    // Áudio Procedural
+    // Ãudio Procedural
     private AudioSource weaponAudio;
     private AudioClip clipSwing;
     private AudioClip clipHitWood;
@@ -114,6 +114,10 @@ public class EquipmentSystem : MonoBehaviour
             currentWeaponInstance = Instantiate(weaponPrefab, playerHandTransform);
             currentWeaponInstance.transform.localPosition = Vector3.zero;
             currentWeaponInstance.transform.localRotation = Quaternion.identity;
+            if (currentWeaponInstance.GetComponent<WeaponMotionSway>() == null)
+            {
+                currentWeaponInstance.AddComponent<WeaponMotionSway>();
+            }
         }
         
         Debug.Log($"[Equipment] Arma equipada: ID {itemID}");
@@ -136,21 +140,22 @@ public class EquipmentSystem : MonoBehaviour
         
         lastAttackTime = Time.time;
         
-        // Efeito Sonoro / Animação Básica (Placeholder via Juice)
+        // Efeito Sonoro / AnimaÃ§Ã£o BÃ¡sica (Placeholder via Juice)
         if (weaponAudio != null) weaponAudio.PlayOneShot(clipSwing);
         
         if (currentWeaponInstance != null)
         {
-            currentWeaponInstance.transform.localRotation = Quaternion.Euler(60f, 0, 0); // Fake Swing Animation
-            Invoke("ResetWeaponRotation", 0.2f);
+            WeaponMotionSway motion = currentWeaponInstance.GetComponent<WeaponMotionSway>();
+            if (motion == null) motion = currentWeaponInstance.AddComponent<WeaponMotionSway>();
+            motion.TriggerAttackMotion();
         }
         
-        // Cálculo de Dano e Range (Arma Branca, Punhos ou Arco)
+        // CÃ¡lculo de Dano e Range (Arma Branca, Punhos ou Arco)
         float damage = 5f; // Punhos
         float currentAttackRange = attackRange;
         bool isRanged = false;
         
-        if (currentWeaponID == 302) damage = 25f; // Faca de caça
+        if (currentWeaponID == 302) damage = 25f; // Faca de caÃ§a
         else if (currentWeaponID == 300) damage = 10f; // Machado
         else if (currentWeaponID == 305) 
         {
@@ -238,7 +243,7 @@ public class EquipmentSystem : MonoBehaviour
                 if (inventory != null)
                 {
                     inventory.AddItem(100, 2);
-                    Debug.Log("[Equipment] Árvore derrubada! +2 Madeira.");
+                    Debug.Log("[Equipment] Ãrvore derrubada! +2 Madeira.");
                 }
                 return "wood";
             }
@@ -288,3 +293,4 @@ public class EquipmentSystem : MonoBehaviour
         }
     }
 }
+

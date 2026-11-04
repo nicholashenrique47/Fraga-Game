@@ -1,6 +1,10 @@
 using UnityEngine;
 using UnityEngine.EventSystems;
 
+/// <summary>
+/// Controlador de Toque de Câmera Mobile.
+/// Acumula os deltas de toque no lado direito da tela para rotação suave em primeira pessoa.
+/// </summary>
 public class CameraTouchController : MonoBehaviour, IPointerDownHandler, IPointerUpHandler, IDragHandler
 {
     private Vector2 touchDelta;
@@ -21,7 +25,7 @@ public class CameraTouchController : MonoBehaviour, IPointerDownHandler, IPointe
     {
         if (isDragging && eventData.pointerId == pointerId)
         {
-            touchDelta = eventData.delta;
+            touchDelta += eventData.delta;
         }
     }
 
@@ -38,7 +42,7 @@ public class CameraTouchController : MonoBehaviour, IPointerDownHandler, IPointe
     public Vector2 GetTouchDelta()
     {
         Vector2 delta = touchDelta;
-        touchDelta = Vector2.zero; // Consumir o delta
+        touchDelta = Vector2.zero; // Consumir o delta acumulado
         return delta;
     }
 }

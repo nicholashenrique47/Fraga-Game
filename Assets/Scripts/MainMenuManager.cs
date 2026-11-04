@@ -43,8 +43,20 @@ public class MainMenuManager : MonoBehaviour
     {
         Time.timeScale = 0f;
         
-        if (mainCamera != null)
+        if (mainCamera == null) mainCamera = Camera.main;
+
+        FirstPersonCamera fpCam = mainCamera != null ? mainCamera.GetComponent<FirstPersonCamera>() : null;
+        if (fpCam != null || (mainCamera != null && mainCamera.transform.parent != null))
         {
+            mainCamera.orthographic = false;
+            mainCamera.clearFlags = CameraClearFlags.Skybox;
+            mainCamera.transform.localPosition = new Vector3(0f, 1.75f, 0.15f);
+            mainCamera.transform.localRotation = Quaternion.identity;
+        }
+        else if (mainCamera != null)
+        {
+            mainCamera.orthographic = false;
+            mainCamera.clearFlags = CameraClearFlags.Skybox;
             mainCamera.transform.position = menuCameraPos;
             mainCamera.transform.rotation = Quaternion.Euler(15f, 45f, 0f); 
         }
@@ -78,8 +90,8 @@ public class MainMenuManager : MonoBehaviour
             }
             else
             {
-                playButton.GetComponentInChildren<Text>().text = "SEM SAVE GUARDADO";
-                playButton.interactable = false; // Só pode criar mundo se não houver save
+                playButton.GetComponentInChildren<Text>().text = "INICIAR JORNADA";
+                playButton.interactable = true; // Permite iniciar jogo novo diretamente
             }
         }
 
@@ -109,7 +121,14 @@ public class MainMenuManager : MonoBehaviour
 
     private void OnPlayPressed()
     {
-        if (gameManager != null) gameManager.ContinueGame();
+        if (System.IO.File.Exists(Application.persistentDataPath + "/fraga_save_v2.dat"))
+        {
+            if (gameManager != null) gameManager.ContinueGame();
+        }
+        else
+        {
+            if (gameManager != null) gameManager.StartNewGame(1913);
+        }
         StartCoroutine(TransitionToGame());
     }
 
@@ -124,7 +143,6 @@ public class MainMenuManager : MonoBehaviour
         {
             if (!int.TryParse(seedInput.text, out parsedSeed))
             {
-                // Se o user escrever "morte", usamos a hashcode da string
                 parsedSeed = seedInput.text.GetHashCode();
             }
         }
@@ -136,18 +154,20 @@ public class MainMenuManager : MonoBehaviour
 
     private IEnumerator TransitionToGame()
     {
-        // Esconder todos os paineis instantaneamente
         SwitchPanel(null);
 
         if (audioManager != null) audioManager.PlayHorrorSting();
 
+        FirstPersonCamera fpCam = mainCamera != null ? mainCamera.GetComponent<FirstPersonCamera>() : null;
+        bool isFirstPerson = (fpCam != null) || (mainCamera != null && mainCamera.transform.parent != null);
+
         float t = 0f;
         while (t < 1f)
         {
-            t += Time.unscaledDeltaTime * 1.5f;
+            t += Time.unscaledDeltaTime * 2.0f;
             if (mainMenuCanvasGroup != null) mainMenuCanvasGroup.alpha = 1f - t;
             
-            if (mainCamera != null)
+            if (mainCamera != null && !isFirstPerson)
             {
                 mainCamera.transform.position = Vector3.Lerp(menuCameraPos, gameCameraPos, t);
                 mainCamera.transform.rotation = Quaternion.Lerp(Quaternion.Euler(15f, 45f, 0f), Quaternion.Euler(45f, 45f, 0f), t);
@@ -164,8 +184,21 @@ public class MainMenuManager : MonoBehaviour
             mainMenuCanvasGroup.gameObject.SetActive(false);
         }
 
+        if (mainCamera != null && isFirstPerson)
+        {
+            mainCamera.transform.localPosition = new Vector3(0f, 1.75f, 0.15f);
+            mainCamera.transform.localRotation = Quaternion.identity;
+        }
+
         if (uiManager != null) uiManager.gameObject.SetActive(true); 
 
-        Time.timeScale = 1f; 
+        Time.timeScale = 1f;
+
+        // Garante enquadramento imediato no jogador pelo IsometricCamera se estiver em modo isométrico
+        var isoCam = mainCamera != null ? mainCamera.GetComponent<IsometricCamera>() : FindFirstObjectByType<IsometricCamera>();
+        if (isoCam != null && !isFirstPerson)
+        {
+            isoCam.SnapToTarget();
+        }
     }
 }

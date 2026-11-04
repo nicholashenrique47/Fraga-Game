@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEditor;
 using UnityEngine.Rendering;
 
@@ -23,14 +23,24 @@ public class FragaSceneSetup : EditorWindow
         return Sprite.Create(texture, new Rect(0, 0, texture.width, texture.height), new Vector2(0.5f, 0.5f));
     }
 
-    [MenuItem("Fraga Native/1. Criar Cena Completa (Mobile)")]
+    [MenuItem("Fraga Native/1. Criar Cena Completa (The Forest Mobile)")]
     public static void CreateGameScene()
     {
-        // 1. Limpar cena atual (opcional, vamos apenas instanciar num ambiente limpo)
+        // 0. Regenera materiais PBR (The Forest) e malhas 3D persistentes
+        ProceduralMaterialGenerator.GenerateMaterials();
+        FragaAssetGenerator.GenerateAssets();
+        FragaModelBridge.SyncExternalModels();
+
+        // Limpeza total da cena atual para garantir idempotencia e zero duplicatas
+        var rootObjects = UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects();
+        foreach (var r in rootObjects)
+        {
+            Object.DestroyImmediate(r);
+        }
         GameObject orchestrator = new GameObject("--- GAME ORCHESTRATOR ---");
         GameManager gm = orchestrator.AddComponent<GameManager>();
         
-        // 2. Setup do TopÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³grafo (Iago)
+        // Setup de componentes
         GameObject playerPrefab = Resources.Load<GameObject>("Prefabs/Player_Prefab");
         GameObject player;
         if (playerPrefab != null) {
@@ -39,54 +49,115 @@ public class FragaSceneSetup : EditorWindow
             player = GameObject.CreatePrimitive(PrimitiveType.Capsule);
         }
         player.name = "Iago (Topografo)";
-        player.transform.position = new Vector3(50f, 1f, 50f); // Centro do mapa 100x100
-        
-        Rigidbody rb = player.AddComponent<Rigidbody>();
+        float startY = TerrainMeshGenerator.GetTerrainHeight(50f, 50f) + 1.0f;
+        player.transform.position = new Vector3(50f, startY, 50f);
+
+        // Remove colisores de membros que causavam forca de penetracao para o ceu
+        foreach (var c in player.GetComponentsInChildren<Collider>())
+        {
+            Object.DestroyImmediate(c);
+        }
+        CapsuleCollider pCol = player.AddComponent<CapsuleCollider>();
+        pCol.center = new Vector3(0, 1.0f, 0);
+        pCol.radius = 0.35f;
+        pCol.height = 1.9f;
+
+        Rigidbody rb = player.GetComponent<Rigidbody>();
+        if (rb == null) rb = player.AddComponent<Rigidbody>();
+        rb.isKinematic = true;
         rb.freezeRotation = true;
-        rb.useGravity = false; // IsomÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â©trico 2.5D
-        
+        rb.useGravity = false;
+        rb.constraints = RigidbodyConstraints.FreezeAll;
+
         PlayerController pc = player.AddComponent<PlayerController>();
         SanitySystem sanity = player.AddComponent<SanitySystem>();
         BuildingSystem buildSys = player.AddComponent<BuildingSystem>();
         ResourceManager resManager = player.AddComponent<ResourceManager>();
         
-        // LampiÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o (URP Light)
+        // Setup de componentes
         GameObject lamp = new GameObject("Lampiao");
         lamp.transform.SetParent(player.transform);
         lamp.transform.localPosition = new Vector3(0, 1f, 0);
         Light lightComp = lamp.AddComponent<Light>();
         lightComp.type = LightType.Point;
         lightComp.color = new Color(1.0f, 0.6f, 0.2f); // Fogo quente
-        lightComp.range = 15f;
-        lightComp.intensity = 2f;
-        lightComp.shadows = LightShadows.Soft; // Sombras atmosfÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â©ricas
+        lightComp.range = 24f;
+        lightComp.intensity = 3.5f;
+        lightComp.shadows = LightShadows.Soft; // Setup de componentes
         sanity.lampLight = lightComp;
 
-        // Setup AtmosfÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â©rico Dark Low-Poly
-        RenderSettings.ambientLight = new Color(0.05f, 0.05f, 0.1f);
+        // Setup de componentes
+        RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
+        RenderSettings.ambientSkyColor = new Color(0.70f, 0.78f, 0.88f);
+        RenderSettings.ambientEquatorColor = new Color(0.48f, 0.55f, 0.50f);
+        RenderSettings.ambientGroundColor = new Color(0.32f, 0.35f, 0.28f);
         RenderSettings.fog = true;
-        RenderSettings.fogColor = new Color(0.02f, 0.02f, 0.05f);
-        RenderSettings.fogMode = FogMode.ExponentialSquared;
-        RenderSettings.fogDensity = 0.04f;
+        RenderSettings.fogColor = new Color(0.55f, 0.65f, 0.72f);
+        RenderSettings.fogMode = FogMode.Exponential;
+        RenderSettings.fogDensity = 0.0055f;
 
         GameObject sun = new GameObject("Sol_Direcional");
+        sun.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
         Light sunLight = sun.AddComponent<Light>();
         sunLight.type = LightType.Directional;
-        sunLight.color = new Color(0.2f, 0.3f, 0.5f); // Luz do luar
-        sunLight.intensity = 0.4f;
-        sunLight.shadows = LightShadows.Hard;
+        sunLight.color = new Color(0.85f, 0.90f, 0.95f);
+        sunLight.intensity = 2.0f;
+        sunLight.shadows = LightShadows.Soft;
         
         DayNightCycle timeCycle = orchestrator.AddComponent<DayNightCycle>();
         timeCycle.directionalLight = sunLight;
         
+        AdvancedSkyboxSystem skySystem = orchestrator.AddComponent<AdvancedSkyboxSystem>();
+        skySystem.dayNightCycle = timeCycle;
+        skySystem.playerTransform = player.transform;
+        
         Camera mainCam = Camera.main;
-        if (mainCam != null)
+        if (mainCam == null)
         {
-            IsometricCamera isoCam = mainCam.gameObject.AddComponent<IsometricCamera>();
-            isoCam.target = player.transform;
-            mainCam.orthographic = true;
-            mainCam.orthographicSize = 8f;
-            mainCam.gameObject.name = "Camera Isometrica";
+            GameObject camObj = new GameObject("Main Camera");
+            camObj.tag = "MainCamera";
+            mainCam = camObj.AddComponent<Camera>();
+            camObj.AddComponent<AudioListener>();
+        }
+
+        // 3. Setup de Camera Primeira Pessoa Imersiva (The Forest Mobile)
+        mainCam.orthographic = false;
+        mainCam.fieldOfView = 65f;
+        mainCam.nearClipPlane = 0.08f;
+        mainCam.farClipPlane = 350f;
+        mainCam.gameObject.name = "Camera_PrimeiraPessoa";
+
+        // Posicionar na altura dos olhos do personagem (1.75m)
+        mainCam.transform.SetParent(player.transform);
+        mainCam.transform.localPosition = new Vector3(0f, 1.75f, 0.15f);
+        mainCam.transform.localRotation = Quaternion.identity;
+
+        IsometricCamera oldIso = mainCam.GetComponent<IsometricCamera>();
+        if (oldIso != null) Object.DestroyImmediate(oldIso);
+
+        FirstPersonCamera fpCam = mainCam.GetComponent<FirstPersonCamera>();
+        if (fpCam == null) fpCam = mainCam.gameObject.AddComponent<FirstPersonCamera>();
+        fpCam.playerBody = player.transform;
+        fpCam.baseFOV = 65f;
+        fpCam.sprintFOV = 78f;
+
+        // Viewmodel / Suporte para segurar machado/tocha estilo The Forest
+        GameObject weaponSlot = new GameObject("Weapon_Holder_FP");
+        weaponSlot.transform.SetParent(mainCam.transform);
+        weaponSlot.transform.localPosition = new Vector3(0.32f, -0.28f, 0.52f);
+        weaponSlot.transform.localRotation = Quaternion.Euler(5f, -10f, 0f);
+        weaponSlot.AddComponent<WeaponMotionSway>();
+
+        GameObject axePrefab = Resources.Load<GameObject>("Prefabs/Axe_Prefab");
+        if (axePrefab != null)
+        {
+            GameObject heldAxe = (GameObject)PrefabUtility.InstantiatePrefab(axePrefab);
+            heldAxe.name = "Held_Survival_Axe";
+            heldAxe.transform.SetParent(weaponSlot.transform);
+            heldAxe.transform.localPosition = Vector3.zero;
+            heldAxe.transform.localRotation = Quaternion.Euler(15f, 185f, -20f);
+            heldAxe.transform.localScale = Vector3.one * 0.75f;
+            foreach (var c in heldAxe.GetComponentsInChildren<Collider>()) Object.DestroyImmediate(c);
         }
 
         // 4. Setup do Sistema de Hordas (Vultos e Entidades)
@@ -121,8 +192,25 @@ public class FragaSceneSetup : EditorWindow
         MapRenderer mapRenderer = orchestrator.AddComponent<MapRenderer>();
         
         mapRenderer.treePrefab = Resources.Load<GameObject>("Prefabs/Tree_Prefab");
-            mapRenderer.barricadePrefab = Resources.Load<GameObject>("Prefabs/Barricade_Prefab");
+        mapRenderer.pineTreePrefab = Resources.Load<GameObject>("Prefabs/PineTree_Prefab");
+        mapRenderer.deadTreePrefab = Resources.Load<GameObject>("Prefabs/DeadTree_Prefab");
+        mapRenderer.fentoPrefab = Resources.Load<GameObject>("Prefabs/Fento_Prefab");
+        mapRenderer.barricadePrefab = Resources.Load<GameObject>("Prefabs/Barricade_Prefab");
         mapRenderer.rockPrefab = Resources.Load<GameObject>("Prefabs/Rock_Prefab");
+        mapRenderer.berryPrefab = Resources.Load<GameObject>("Prefabs/Berry_Prefab");
+        mapRenderer.mushroomPrefab = Resources.Load<GameObject>("Prefabs/Mushroom_Prefab");
+        mapRenderer.pondPrefab = Resources.Load<GameObject>("Prefabs/Pond_Prefab");
+        mapRenderer.waterCatcherPrefab = Resources.Load<GameObject>("Prefabs/WaterCatcher_Prefab");
+        mapRenderer.workbenchPrefab = Resources.Load<GameObject>("Prefabs/Workbench_Prefab");
+        mapRenderer.farmlandPrefab = Resources.Load<GameObject>("Prefabs/Farmland_Prefab");
+        mapRenderer.cauldronPrefab = Resources.Load<GameObject>("Prefabs/Cauldron_Prefab");
+        mapRenderer.snareTrapPrefab = Resources.Load<GameObject>("Prefabs/SnareTrap_Prefab");
+        mapRenderer.runicStonePrefab = Resources.Load<GameObject>("Prefabs/RunicStone_Prefab");
+        mapRenderer.fallenLogPrefab = Resources.Load<GameObject>("Prefabs/FallenLog_Prefab");
+        mapRenderer.thornyBushPrefab = Resources.Load<GameObject>("Prefabs/ThornyBush_Prefab");
+        mapRenderer.glowMushroomPrefab = Resources.Load<GameObject>("Prefabs/GlowMushroom_Prefab");
+        mapRenderer.celticCrossPrefab = Resources.Load<GameObject>("Prefabs/CelticCross_Prefab");
+        mapRenderer.ancientGravePrefab = Resources.Load<GameObject>("Prefabs/AncientGrave_Prefab");
         mapRenderer.farolCeltaPrefab = Resources.Load<GameObject>("Prefabs/FarolCelta_Prefab");
         
         // Ruina (Usa Cubo como base caso nao tenha prefab)
@@ -136,7 +224,7 @@ public class FragaSceneSetup : EditorWindow
             tempRuin.SetActive(false);
         }
 
-        // 4.6 Setup do ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Âudio e Sanidade Visual
+        // Setup de componentes
         AudioManager audioManager = orchestrator.AddComponent<AudioManager>();
         audioManager.dayNightCycle = timeCycle;
         audioManager.sanitySystem = sanity;
@@ -159,6 +247,11 @@ public class FragaSceneSetup : EditorWindow
         GameObject ppVolume = new GameObject("PostProcessing_Volume");
         Volume volume = ppVolume.AddComponent<Volume>();
         volume.isGlobal = true;
+        volume.profile = AssetDatabase.LoadAssetAtPath<VolumeProfile>("Assets/Settings/DefaultVolumeProfile.asset");
+        if (volume.profile == null)
+        {
+            volume.profile = ScriptableObject.CreateInstance<VolumeProfile>();
+        }
         timeCycle.globalFogVolume = volume;
 
         Shader GetShaderSafely(string shaderName)
@@ -180,7 +273,7 @@ public class FragaSceneSetup : EditorWindow
         GameObject fakeVulto = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         sanityVisuals.fakeVultoMesh = fakeVulto.GetComponent<MeshFilter>().sharedMesh;
         sanityVisuals.fakeVultoMaterial = new Material(GetShaderSafely("Fraga/VultoShadow_Instanced"));
-        sanityVisuals.fakeVultoMaterial.color = Color.red; // AlucinaÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Âµes vermelhas
+        sanityVisuals.fakeVultoMaterial.color = Color.red; // Setup de componentes
         sanityVisuals.fakeVultoMaterial.enableInstancing = true;
         Object.DestroyImmediate(fakeVulto);
 
@@ -189,6 +282,17 @@ public class FragaSceneSetup : EditorWindow
         weather.dayNightCycle = timeCycle;
         weather.audioManager = audioManager;
         weather.playerTransform = player.transform;
+
+        // Efeitos Atmosf?ricos estilo The Forest (Poeira, Vaga-lumes, N?voa da Madrugada e Folhas ao Vento)
+        AtmosphericEffectsSystem atmos = orchestrator.AddComponent<AtmosphericEffectsSystem>();
+        atmos.dayNightCycle = timeCycle;
+        atmos.weatherSystem = weather;
+        atmos.playerTransform = player.transform;
+
+        // Relva Procedural densa estilo The Forest com GPU Instancing e vento
+        ProceduralGrassSystem grassSys = orchestrator.AddComponent<ProceduralGrassSystem>();
+        grassSys.playerTransform = player.transform;
+        grassSys.weatherSystem = weather;
 
         // Vulto e Arvores agora sao baseados nos Prefabs, nao precisamos sobrescrever aqui
         // Adicionar malha para Cavernas/Rochas (Agora no MapRenderer via Prefab)
@@ -213,7 +317,7 @@ public class FragaSceneSetup : EditorWindow
         TerrainMeshGenerator terrainGen = terrainObj.AddComponent<TerrainMeshGenerator>();
         mapRenderer.terrainGenerator = terrainGen;
 
-        // 5. Setup da UI Mobile e Meta-ProgressÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o (MonetizaÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o)
+        // Setup de componentes
         GameObject canvasObj = new GameObject("UI_Mobile_Canvas");
         Canvas canvas = canvasObj.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
@@ -233,9 +337,8 @@ public class FragaSceneSetup : EditorWindow
         touchRT.offsetMin = Vector2.zero;
         touchRT.offsetMax = Vector2.zero;
         CameraTouchController touchCtrl = touchFieldObj.AddComponent<CameraTouchController>();
-        if (mainCam != null) {
-            FirstPersonCamera fpCam = mainCam.GetComponent<FirstPersonCamera>();
-            if (fpCam != null) fpCam.touchController = touchCtrl;
+        if (fpCam != null) {
+            fpCam.touchController = touchCtrl;
         }
 
         UIManager uiManager = canvasObj.AddComponent<UIManager>();
@@ -251,12 +354,12 @@ public class FragaSceneSetup : EditorWindow
         LeaderboardManager leaderboard = orchestrator.AddComponent<LeaderboardManager>();
         leaderboard.dayNightCycle = timeCycle;
 
-        // 6. InventÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡rio e Defesa
+        // Setup de componentes
         InventorySystem inventory = orchestrator.AddComponent<InventorySystem>();
         inventory.buildingSystem = buildSys;
         inventory.sanitySystem = sanity;
 
-        // 7. IA AvanÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§ada (Diretor e Haptics)
+        // Setup de componentes
         HordeDirector hordeDirector = orchestrator.AddComponent<HordeDirector>();
         hordeDirector.dayNightCycle = timeCycle;
         hordeDirector.vultoManager = vultoManager;
@@ -287,14 +390,93 @@ public class FragaSceneSetup : EditorWindow
         deathRect.offsetMax = Vector2.zero;
         ppManager.deathOverlay = deathCG;
 
-        // Death Panel (Botoes de Revive e Return)
+        // Death Panel AAA (Painel Interativo de Morte e Ressurreição)
         GameObject deathPanel = new GameObject("Death_Panel");
-        deathPanel.transform.SetParent(canvasObj.transform);
+        deathPanel.transform.SetParent(canvasObj.transform, false);
         RectTransform dpRect = deathPanel.AddComponent<RectTransform>();
-        dpRect.anchorMin = new Vector2(0.2f, 0.3f);
-        dpRect.anchorMax = new Vector2(0.8f, 0.7f);
+        dpRect.anchorMin = Vector2.zero;
+        dpRect.anchorMax = Vector2.one;
         dpRect.offsetMin = Vector2.zero;
         dpRect.offsetMax = Vector2.zero;
+        UnityEngine.UI.Image dpImg = deathPanel.AddComponent<UnityEngine.UI.Image>();
+        dpImg.color = new Color(0.04f, 0.01f, 0.01f, 0.95f);
+        dpImg.raycastTarget = true;
+
+        GameObject deathModal = new GameObject("Death_Modal");
+        deathModal.transform.SetParent(deathPanel.transform, false);
+        RectTransform dmRect = deathModal.AddComponent<RectTransform>();
+        dmRect.anchoredPosition = Vector2.zero;
+        dmRect.sizeDelta = new Vector2(680, 360);
+        UnityEngine.UI.Image dmImg = deathModal.AddComponent<UnityEngine.UI.Image>();
+        dmImg.color = new Color(0.08f, 0.02f, 0.02f, 0.95f);
+        var dmOutline = deathModal.AddComponent<UnityEngine.UI.Outline>();
+        dmOutline.effectColor = new Color(0.75f, 0.15f, 0.15f, 0.85f);
+        dmOutline.effectDistance = new Vector2(2, -2);
+
+        GameObject deathTitle = new GameObject("Death_Title");
+        deathTitle.transform.SetParent(deathModal.transform, false);
+        RectTransform dtRect = deathTitle.AddComponent<RectTransform>();
+        dtRect.anchoredPosition = new Vector2(0, 95);
+        dtRect.sizeDelta = new Vector2(620, 60);
+        UnityEngine.UI.Text dtText = deathTitle.AddComponent<UnityEngine.UI.Text>();
+        dtText.text = "A FRAGA TE RECLAMOU";
+        dtText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        dtText.fontSize = 32;
+        dtText.fontStyle = FontStyle.Bold;
+        dtText.alignment = TextAnchor.MiddleCenter;
+        dtText.color = new Color(0.95f, 0.20f, 0.20f, 1f);
+        var dtShadow = deathTitle.AddComponent<UnityEngine.UI.Shadow>();
+        dtShadow.effectColor = Color.black;
+        dtShadow.effectDistance = new Vector2(2f, -2f);
+
+        GameObject deathSub = new GameObject("Death_Subtitle");
+        deathSub.transform.SetParent(deathModal.transform, false);
+        RectTransform dsRect = deathSub.AddComponent<RectTransform>();
+        dsRect.anchoredPosition = new Vector2(0, 35);
+        dsRect.sizeDelta = new Vector2(580, 45);
+        UnityEngine.UI.Text dsText = deathSub.AddComponent<UnityEngine.UI.Text>();
+        dsText.text = "A escuridão consumiu tuas forças vitais.\nA luz da alvorada é a tua única esperança.";
+        dsText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        dsText.fontSize = 17;
+        dsText.alignment = TextAnchor.MiddleCenter;
+        dsText.color = new Color(0.85f, 0.85f, 0.85f, 0.90f);
+
+        GameObject reviveBtnObj = new GameObject("Btn_Death_Revive");
+        reviveBtnObj.transform.SetParent(deathModal.transform, false);
+        RectTransform rBtnRect = reviveBtnObj.AddComponent<RectTransform>();
+        rBtnRect.anchoredPosition = new Vector2(0, -40);
+        rBtnRect.sizeDelta = new Vector2(300, 52);
+        UnityEngine.UI.Image rBtnImg = reviveBtnObj.AddComponent<UnityEngine.UI.Image>();
+        rBtnImg.color = new Color(0.40f, 0.12f, 0.12f, 1f);
+        var rOutline = reviveBtnObj.AddComponent<UnityEngine.UI.Outline>();
+        rOutline.effectColor = new Color(1.0f, 0.35f, 0.35f, 0.9f);
+        rOutline.effectDistance = new Vector2(1.5f, -1.5f);
+        UnityEngine.UI.Button rBtn = reviveBtnObj.AddComponent<UnityEngine.UI.Button>();
+        rBtn.onClick.AddListener(() =>
+        {
+            if (gm != null) gm.RevivePlayer();
+            if (uiManager != null) uiManager.HideDeathScreen();
+        });
+        CreateButtonLabel(reviveBtnObj.transform, "☀ RENASCER NA ALVORADA", 16);
+
+        GameObject menuBtnObj = new GameObject("Btn_Death_Menu");
+        menuBtnObj.transform.SetParent(deathModal.transform, false);
+        RectTransform mBtnRect = menuBtnObj.AddComponent<RectTransform>();
+        mBtnRect.anchoredPosition = new Vector2(0, -100);
+        mBtnRect.sizeDelta = new Vector2(240, 42);
+        UnityEngine.UI.Image mBtnImg = menuBtnObj.AddComponent<UnityEngine.UI.Image>();
+        mBtnImg.color = new Color(0.18f, 0.20f, 0.25f, 0.95f);
+        var mOutline = menuBtnObj.AddComponent<UnityEngine.UI.Outline>();
+        mOutline.effectColor = new Color(0.45f, 0.55f, 0.75f, 0.7f);
+        mOutline.effectDistance = new Vector2(1.5f, -1.5f);
+        UnityEngine.UI.Button mBtn = menuBtnObj.AddComponent<UnityEngine.UI.Button>();
+        mBtn.onClick.AddListener(() =>
+        {
+            Time.timeScale = 1f;
+            UnityEngine.SceneManagement.SceneManager.LoadScene(UnityEngine.SceneManagement.SceneManager.GetActiveScene().name);
+        });
+        CreateButtonLabel(menuBtnObj.transform, "MENU PRINCIPAL", 14);
+
         deathPanel.SetActive(false);
         uiManager.deathPanel = deathPanel;
 
@@ -317,6 +499,7 @@ public class FragaSceneSetup : EditorWindow
         playerStatusSys.sanitySystem = sanity;
         playerStatusSys.dayNightCycle = timeCycle;
         weather.playerStatus = playerStatusSys;
+        if (skySystem != null) skySystem.playerStatusRef = playerStatusSys;
 
         // 13. Inventario Avancado com Slots
         InventoryAdvanced advInventory = player.AddComponent<InventoryAdvanced>();
@@ -366,6 +549,15 @@ public class FragaSceneSetup : EditorWindow
             tempWolf.GetComponent<MeshRenderer>().sharedMaterial = wolfMat;
         }
 
+        fauna.bearPrefab = Resources.Load<GameObject>("Prefabs/Bear_Prefab");
+        fauna.boarPrefab = Resources.Load<GameObject>("Prefabs/Boar_Prefab");
+        fauna.rabbitPrefab = Resources.Load<GameObject>("Prefabs/Rabbit_Prefab");
+        fauna.maxDeer = 12;
+        fauna.maxWolves = 6;
+        fauna.maxBears = 3;
+        fauna.maxBoars = 5;
+        fauna.maxRabbits = 14;
+
         // 16. Ambiente do Mundo (Ervas, Cogumelos, Bagas)
         WorldEnvironment worldEnv = orchestrator.AddComponent<WorldEnvironment>();
         worldEnv.playerTransform = player.transform;
@@ -397,30 +589,168 @@ public class FragaSceneSetup : EditorWindow
 
         Sprite circleSprite = CreateCircleSprite(100);
 
-        // Joystick Mobile
+        // 16.5 Joystick Mobile Responsivo e Touch Zone (The Forest AAA)
+        GameObject joystickZone = new GameObject("Joystick_TouchZone");
+        joystickZone.transform.SetParent(canvasObj.transform, false);
+        UnityEngine.UI.Image zoneImg = joystickZone.AddComponent<UnityEngine.UI.Image>();
+        zoneImg.color = new Color(0, 0, 0, 0);
+        zoneImg.raycastTarget = true;
+        RectTransform zoneRect = joystickZone.GetComponent<RectTransform>();
+        zoneRect.anchorMin = new Vector2(0, 0);
+        zoneRect.anchorMax = new Vector2(0.48f, 0.65f);
+        zoneRect.offsetMin = Vector2.zero;
+        zoneRect.offsetMax = Vector2.zero;
+
         GameObject joystickBg = new GameObject("Joystick_BG");
-        joystickBg.transform.SetParent(canvasObj.transform);
+        joystickBg.transform.SetParent(canvasObj.transform, false);
         UnityEngine.UI.Image bgImg = joystickBg.AddComponent<UnityEngine.UI.Image>();
         bgImg.sprite = circleSprite;
-        bgImg.color = new Color(0, 0, 0, 0.3f);
+        bgImg.color = new Color(0.08f, 0.1f, 0.12f, 0.45f);
+        bgImg.raycastTarget = false;
         RectTransform bgRect = joystickBg.GetComponent<RectTransform>();
-        bgRect.sizeDelta = new Vector2(200, 200);
-        bgRect.anchoredPosition = new Vector2(150, 150);
+        bgRect.sizeDelta = new Vector2(180, 180);
         bgRect.anchorMin = new Vector2(0, 0);
         bgRect.anchorMax = new Vector2(0, 0);
+        bgRect.pivot = new Vector2(0.5f, 0.5f);
+        bgRect.anchoredPosition = new Vector2(160, 160);
 
         GameObject joystickHandle = new GameObject("Joystick_Handle");
-        joystickHandle.transform.SetParent(joystickBg.transform);
+        joystickHandle.transform.SetParent(joystickBg.transform, false);
         UnityEngine.UI.Image handleImg = joystickHandle.AddComponent<UnityEngine.UI.Image>();
         handleImg.sprite = circleSprite;
-        handleImg.color = new Color(1, 1, 1, 0.8f);
+        handleImg.color = new Color(1f, 1f, 1f, 0.85f);
+        handleImg.raycastTarget = false;
         RectTransform handleRect = joystickHandle.GetComponent<RectTransform>();
-        handleRect.sizeDelta = new Vector2(80, 80);
+        handleRect.sizeDelta = new Vector2(75, 75);
+        handleRect.anchorMin = new Vector2(0.5f, 0.5f);
+        handleRect.anchorMax = new Vector2(0.5f, 0.5f);
+        handleRect.pivot = new Vector2(0.5f, 0.5f);
+        handleRect.anchoredPosition = Vector2.zero;
 
-        MobileInputController mobileInput = joystickBg.AddComponent<MobileInputController>();
+        MobileInputController mobileInput = joystickZone.AddComponent<MobileInputController>();
         mobileInput.joystickBackground = bgRect;
         mobileInput.joystickHandle = handleRect;
+        mobileInput.joystickRadius = 80f;
+        mobileInput.deadZone = 6f;
+        mobileInput.joystickType = MobileInputController.JoystickType.DynamicFloatingFollow;
         pc.mobileInput = mobileInput;
+
+        // Sistema de Combate e Corte de Madeira AAA
+        ChoppingAndCombatSystem combatSys = player.AddComponent<ChoppingAndCombatSystem>();
+        combatSys.playerCamera = Camera.main;
+        combatSys.playerController = pc;
+        combatSys.inventory = advInventory;
+
+        // Interface de Inventário e Crafting (Mochila de Sobrevivência)
+        SurvivalInventoryCraftUI craftUI = canvasObj.AddComponent<SurvivalInventoryCraftUI>();
+        craftUI.inventory = advInventory;
+        craftUI.craftingSystem = crafting;
+        craftUI.playerStatus = playerStatusSys;
+        craftUI.cameraTouchZone = touchCtrl;
+
+        // --- CLUSTER DE BOTÕES DE AÇÃO MOBILE (The Forest AAA Layout) ---
+        // 1. Botão de Golpe / Corte de Madeira (🪓)
+        GameObject atkBtnObj = new GameObject("Btn_Mobile_Attack");
+        atkBtnObj.transform.SetParent(canvasObj.transform, false);
+        RectTransform atkRT = atkBtnObj.AddComponent<RectTransform>();
+        atkRT.anchorMin = new Vector2(1, 0); atkRT.anchorMax = new Vector2(1, 0); atkRT.pivot = new Vector2(1, 0);
+        atkRT.anchoredPosition = new Vector2(-65, 110);
+        atkRT.sizeDelta = new Vector2(88, 88);
+        UnityEngine.UI.Image atkImg = atkBtnObj.AddComponent<UnityEngine.UI.Image>();
+        atkImg.sprite = circleSprite;
+        atkImg.color = new Color(0.20f, 0.32f, 0.44f, 0.85f);
+        var atkOutline = atkBtnObj.AddComponent<UnityEngine.UI.Outline>();
+        atkOutline.effectColor = new Color(0.35f, 0.85f, 1.0f, 0.45f);
+        atkOutline.effectDistance = new Vector2(2, -2);
+        UnityEngine.UI.Button atkBtn = atkBtnObj.AddComponent<UnityEngine.UI.Button>();
+        atkBtn.onClick.AddListener(() => { if (combatSys != null) combatSys.TriggerAttack(); });
+        CreateButtonLabel(atkBtnObj.transform, "🪓\nGOLPE", 13);
+
+        // 2. Botão de Pulo (▲)
+        GameObject jumpBtnObj = new GameObject("Btn_Mobile_Jump");
+        jumpBtnObj.transform.SetParent(canvasObj.transform, false);
+        RectTransform jumpRT = jumpBtnObj.AddComponent<RectTransform>();
+        jumpRT.anchorMin = new Vector2(1, 0); jumpRT.anchorMax = new Vector2(1, 0); jumpRT.pivot = new Vector2(1, 0);
+        jumpRT.anchoredPosition = new Vector2(-65, 220);
+        jumpRT.sizeDelta = new Vector2(68, 68);
+        UnityEngine.UI.Image jumpImg = jumpBtnObj.AddComponent<UnityEngine.UI.Image>();
+        jumpImg.sprite = circleSprite;
+        jumpImg.color = new Color(0.14f, 0.20f, 0.28f, 0.75f);
+        var jumpOutline = jumpBtnObj.AddComponent<UnityEngine.UI.Outline>();
+        jumpOutline.effectColor = new Color(0.35f, 0.85f, 1.0f, 0.35f);
+        jumpOutline.effectDistance = new Vector2(1.5f, -1.5f);
+        UnityEngine.UI.Button jumpBtn = jumpBtnObj.AddComponent<UnityEngine.UI.Button>();
+        jumpBtn.onClick.AddListener(() => { if (pc != null) pc.TryJump(); });
+        CreateButtonLabel(jumpBtnObj.transform, "▲\nPULAR", 11);
+
+        // 3. Botão de Coleta / Interação (✋)
+        GameObject interactBtnObj = new GameObject("Btn_Mobile_Interact");
+        interactBtnObj.transform.SetParent(canvasObj.transform, false);
+        RectTransform intRT = interactBtnObj.AddComponent<RectTransform>();
+        intRT.anchorMin = new Vector2(1, 0); intRT.anchorMax = new Vector2(1, 0); intRT.pivot = new Vector2(1, 0);
+        intRT.anchoredPosition = new Vector2(-165, 110);
+        intRT.sizeDelta = new Vector2(68, 68);
+        UnityEngine.UI.Image intImg = interactBtnObj.AddComponent<UnityEngine.UI.Image>();
+        intImg.sprite = circleSprite;
+        intImg.color = new Color(0.14f, 0.20f, 0.28f, 0.75f);
+        var intOutline = interactBtnObj.AddComponent<UnityEngine.UI.Outline>();
+        intOutline.effectColor = new Color(0.35f, 0.85f, 1.0f, 0.35f);
+        intOutline.effectDistance = new Vector2(1.5f, -1.5f);
+        UnityEngine.UI.Button intBtn = interactBtnObj.AddComponent<UnityEngine.UI.Button>();
+        intBtn.onClick.AddListener(() => { if (resManager != null) resManager.TryHarvest(); });
+        CreateButtonLabel(interactBtnObj.transform, "✋\nCOLETAR", 11);
+
+        // 4. Botão de Mochila / Crafting (🎒)
+        GameObject bagBtnObj = new GameObject("Btn_Mobile_Inventory");
+        bagBtnObj.transform.SetParent(canvasObj.transform, false);
+        RectTransform bagRT = bagBtnObj.AddComponent<RectTransform>();
+        bagRT.anchorMin = new Vector2(1, 0); bagRT.anchorMax = new Vector2(1, 0); bagRT.pivot = new Vector2(1, 0);
+        bagRT.anchoredPosition = new Vector2(-165, 220);
+        bagRT.sizeDelta = new Vector2(68, 68);
+        UnityEngine.UI.Image bagImg = bagBtnObj.AddComponent<UnityEngine.UI.Image>();
+        bagImg.sprite = circleSprite;
+        bagImg.color = new Color(0.14f, 0.26f, 0.36f, 0.85f);
+        var bagOutline = bagBtnObj.AddComponent<UnityEngine.UI.Outline>();
+        bagOutline.effectColor = new Color(0.4f, 0.9f, 1.0f, 0.45f);
+        bagOutline.effectDistance = new Vector2(1.5f, -1.5f);
+        UnityEngine.UI.Button bagBtn = bagBtnObj.AddComponent<UnityEngine.UI.Button>();
+        bagBtn.onClick.AddListener(() => { if (craftUI != null) craftUI.ToggleMenu(); });
+        CreateButtonLabel(bagBtnObj.transform, "🎒\nMOCHILA", 11);
+
+        // 5. Botão de Agachamento (▼)
+        GameObject crouchBtnObj = new GameObject("Btn_Mobile_Crouch");
+        crouchBtnObj.transform.SetParent(canvasObj.transform, false);
+        RectTransform crRT = crouchBtnObj.AddComponent<RectTransform>();
+        crRT.anchorMin = new Vector2(1, 0); crRT.anchorMax = new Vector2(1, 0); crRT.pivot = new Vector2(1, 0);
+        crRT.anchoredPosition = new Vector2(-255, 110);
+        crRT.sizeDelta = new Vector2(60, 60);
+        UnityEngine.UI.Image crImg = crouchBtnObj.AddComponent<UnityEngine.UI.Image>();
+        crImg.sprite = circleSprite;
+        crImg.color = new Color(0.12f, 0.16f, 0.22f, 0.70f);
+        var crOutline = crouchBtnObj.AddComponent<UnityEngine.UI.Outline>();
+        crOutline.effectColor = new Color(0.35f, 0.85f, 1.0f, 0.30f);
+        crOutline.effectDistance = new Vector2(1.5f, -1.5f);
+        UnityEngine.UI.Button crBtn = crouchBtnObj.AddComponent<UnityEngine.UI.Button>();
+        crBtn.onClick.AddListener(() => { if (pc != null) pc.ToggleCrouch(); });
+        CreateButtonLabel(crouchBtnObj.transform, "▼\nAGACHO", 10);
+
+        // 6. Botão de Lanterna / Luz (🏮)
+        GameObject lanternBtnObj = new GameObject("Btn_Mobile_Lantern");
+        lanternBtnObj.transform.SetParent(canvasObj.transform, false);
+        RectTransform lanRT = lanternBtnObj.AddComponent<RectTransform>();
+        lanRT.anchorMin = new Vector2(1, 0); lanRT.anchorMax = new Vector2(1, 0); lanRT.pivot = new Vector2(1, 0);
+        lanRT.anchoredPosition = new Vector2(-165, 330);
+        lanRT.sizeDelta = new Vector2(68, 68);
+        UnityEngine.UI.Image lanImg = lanternBtnObj.AddComponent<UnityEngine.UI.Image>();
+        lanImg.sprite = circleSprite;
+        lanImg.color = new Color(0.35f, 0.26f, 0.10f, 0.85f);
+        var lanOutline = lanternBtnObj.AddComponent<UnityEngine.UI.Outline>();
+        lanOutline.effectColor = new Color(1.0f, 0.82f, 0.25f, 0.55f);
+        lanOutline.effectDistance = new Vector2(1.5f, -1.5f);
+        UnityEngine.UI.Button lanBtn = lanternBtnObj.AddComponent<UnityEngine.UI.Button>();
+        lanBtn.onClick.AddListener(() => { if (sanity != null) sanity.ToggleLamp(); });
+        CreateButtonLabel(lanternBtnObj.transform, "🏮\nLUZ", 11);
+
 
         // 17. Associar o Orchestrator
         gm.playerTransform = player.transform;
@@ -441,7 +771,7 @@ public class FragaSceneSetup : EditorWindow
         saveSys.playerStatus = playerStatusSys;
         saveSys.inventory = advInventory;
 
-        // 19. Surface Audio SistÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â©mico
+        // Setup de componentes
         SurfaceAudio surfaceAudio = player.AddComponent<SurfaceAudio>();
         surfaceAudio.playerTransform = player.transform;
         surfaceAudio.resourceManager = resManager;
@@ -450,7 +780,7 @@ public class FragaSceneSetup : EditorWindow
         // 20. Performance Profiler (Analise FPS/GC)
         orchestrator.AddComponent<PerformanceProfiler>();
 
-        // 21. Main Menu Nativo AvanÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§ado (Zero Loading Screens com Seed Input)
+        // Setup de componentes
         GameObject menuCanvasObj = new GameObject("MainMenu_Canvas");
         Canvas menuCanvas = menuCanvasObj.AddComponent<Canvas>();
         menuCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
@@ -459,22 +789,7 @@ public class FragaSceneSetup : EditorWindow
         mcs.uiScaleMode = UnityEngine.UI.CanvasScaler.ScaleMode.ScaleWithScreenSize;
         mcs.referenceResolution = new Vector2(1920, 1080);
         mcs.matchWidthOrHeight = 0.5f;
-        menucanvasObj.AddComponent<UnityEngine.UI.GraphicRaycaster>();
-        
-        GameObject touchFieldObj = new GameObject("CameraTouchZone");
-        touchFieldObj.transform.SetParent(canvasObj.transform);
-        UnityEngine.UI.Image touchImg = touchFieldObj.AddComponent<UnityEngine.UI.Image>();
-        touchImg.color = new Color(0,0,0,0); // invisible
-        RectTransform touchRT = touchFieldObj.GetComponent<RectTransform>();
-        touchRT.anchorMin = new Vector2(0.5f, 0);
-        touchRT.anchorMax = new Vector2(1, 1);
-        touchRT.offsetMin = Vector2.zero;
-        touchRT.offsetMax = Vector2.zero;
-        CameraTouchController touchCtrl = touchFieldObj.AddComponent<CameraTouchController>();
-        if (mainCam != null) {
-            FirstPersonCamera fpCam = mainCam.GetComponent<FirstPersonCamera>();
-            if (fpCam != null) fpCam.touchController = touchCtrl;
-        }
+        menuCanvasObj.AddComponent<UnityEngine.UI.GraphicRaycaster>();
         CanvasGroup menuCG = menuCanvasObj.AddComponent<CanvasGroup>();
 
         // Fundo escuro
@@ -633,7 +948,10 @@ public class FragaSceneSetup : EditorWindow
         lootManager.playerTransform = player.transform;
         lootManager.inventory = advInventory;
 
-        // 23. SanityVisuals (URP Post-Processing via Fome e Sanidade) -> Substituido pelo PostProcessingManager
+        if (ppManager != null)
+        {
+            ppManager.playerStatus = playerStatusSys;
+        }
 
         // Limpar o EventSystem que pode faltar
         if (Object.FindAnyObjectByType<UnityEngine.EventSystems.EventSystem>() == null)
@@ -643,6 +961,24 @@ public class FragaSceneSetup : EditorWindow
             es.AddComponent<UnityEngine.EventSystems.StandaloneInputModule>();
         }
 
-        Debug.LogWarning("[FRAGA NATIVE] Cena Completa AAA (Fauna + Craft + Inventario + Menu + PostProc) construida! Pressione PLAY.");
+        UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
+        UnityEditor.SceneManagement.EditorSceneManager.SaveScene(UnityEngine.SceneManagement.SceneManager.GetActiveScene(), "Assets/Scenes/GameScene.unity");
+        Debug.LogWarning("[FRAGA NATIVE] Cena Completa AAA construida e salva no disco! Pressione PLAY.");
+    }
+    private static void CreateButtonLabel(Transform parent, string text, int fontSize)
+    {
+        GameObject textObj = new GameObject("Text");
+        textObj.transform.SetParent(parent, false);
+        UnityEngine.UI.Text t = textObj.AddComponent<UnityEngine.UI.Text>();
+        t.text = text;
+        t.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        t.fontSize = fontSize;
+        t.fontStyle = FontStyle.Bold;
+        t.alignment = TextAnchor.MiddleCenter;
+        t.color = new Color(0.95f, 0.95f, 0.95f, 0.95f);
+        t.raycastTarget = false;
+        RectTransform rt = textObj.GetComponent<RectTransform>();
+        rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one;
+        rt.offsetMin = Vector2.zero; rt.offsetMax = Vector2.zero;
     }
 }

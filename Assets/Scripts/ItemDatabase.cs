@@ -31,6 +31,8 @@ public class ItemData
     public int craftOutputAmount;   // Quantidade produzida no craft
     public bool isPerishable;       // Apodrece ao longo do tempo
     public float maxDurability;     // Segundos ate apodrecer
+    public bool curesBleeding;      // Cura sangramento ativo
+    public bool curesFracture;      // Cura ossos partidos
 }
 
 public static class ItemDatabase

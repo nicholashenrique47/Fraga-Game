@@ -15,8 +15,8 @@ public class PlayerStatus : MonoBehaviour
     [Header("Fome e Sede")]
     [Range(0f, 100f)] public float hunger = 100f;
     [Range(0f, 100f)] public float thirst = 100f;
-    public float hungerDrainRate = 0.8f;   // Por segundo (lento)
-    public float thirstDrainRate = 1.2f;   // Sede desce mais rapido
+    public float hungerDrainRate = 0.04f;   // Por segundo (lento)
+    public float thirstDrainRate = 0.06f;   // Sede desce mais rapido
     public float starvationDamage = 2f;    // Dano na sanidade por segundo quando fome = 0
     public float dehydrationDamage = 3f;   // Dano na sanidade por segundo quando sede = 0
 
@@ -26,13 +26,13 @@ public class PlayerStatus : MonoBehaviour
     private bool isDead = false;
 
     [Header("Temperatura")]
-    [Range(-20f, 40f)] public float bodyTemperature = 20f;
+    [Range(-20f, 40f)] public float bodyTemperature = 37f;
     public float ambientDayTemp = 18f;
     public float ambientNightTemp = 2f;
     public float bonfireWarmth = 15f;      // Bonus de temperatura perto de fogueira
-    public float coldThreshold = 5f;       // Abaixo disto, sofre efeitos de frio
+    public float coldThreshold = 35f;      // Abaixo disto, sofre efeitos de frio (sincronizado com TIER1)
     public float coldSanityDamageRate = 1.5f; // Dano na sanidade por segundo
-    public float coldHealthDamageRate = 1f;   // Dano na vida fisica (Hipotermia)
+    public float coldHealthDamageRate = 0.5f; // Dano na vida fisica (Hipotermia)
 
     [Header("Status Effects")]
     public bool isSprinting = false;
@@ -42,6 +42,8 @@ public class PlayerStatus : MonoBehaviour
     public bool isPoisoned = false;
     public float poisonTimer = 0f;
     public float poisonDamageRate = 3f;
+    public bool isBleeding = false;
+    public bool isFractured = false;
 
     [Header("Dependencies")]
     public PlayerController playerController;
@@ -54,6 +56,21 @@ public class PlayerStatus : MonoBehaviour
     private PostProcessingManager ppManagerCache;
     private HapticManager hapticCache;
     private GameManager gameManagerCache;
+
+    private void Awake()
+    {
+        health = 100f;
+        stamina = 100f;
+        hunger = 100f;
+        thirst = 100f;
+        bodyTemperature = 37.0f;
+        isDead = false;
+        isStarving = false;
+        isFreezing = false;
+        isPoisoned = false;
+        isBleeding = false;
+        isFractured = false;
+    }
 
     private void Start()
     {
@@ -75,7 +92,7 @@ public class PlayerStatus : MonoBehaviour
         {
             lastBreathingTime = Time.time;
             AudioManager am = FindAnyObjectByType<AudioManager>();
-            if (am != null) am.PlayHorrorSting(); // Reutilizando canal de horror para respiraÃƒÂ§ÃƒÂ£o pesada
+            if (am != null) am.PlayHorrorSting(); // Reutilizando canal de horror para respiracao pesada
             
             // Camera shake subtil
             FirstPersonCamera cam = Camera.main != null ? Camera.main.GetComponent<FirstPersonCamera>() : null;
@@ -94,6 +111,13 @@ public class PlayerStatus : MonoBehaviour
     public void TakeDamage(float amount)
     {
         if (isDead) return;
+
+        // Processamento tático de bloqueio e Parry Perfeito (The Forest Melee)
+        if (PlayerMeleeCombatDefense.Instance != null)
+        {
+            amount = PlayerMeleeCombatDefense.Instance.ProcessIncomingDamage(amount);
+            if (amount <= 0f) return; // Parry Perfeito anulou 100% do dano!
+        }
 
         health -= amount;
         Debug.Log($"[PlayerStatus] Levou {amount} de dano! Vida: {health}");
@@ -134,6 +158,26 @@ public class PlayerStatus : MonoBehaviour
         }
     }
 
+    public void Revive()
+    {
+        isDead = false;
+        health = 100f;
+        stamina = 100f;
+        hunger = 100f;
+        thirst = 100f;
+        bodyTemperature = 37.0f;
+        isStarving = false;
+        isFreezing = false;
+        isPoisoned = false;
+        isBleeding = false;
+        isFractured = false;
+
+        if (BodyTemperatureSystem.Instance != null)
+        {
+            BodyTemperatureSystem.Instance.ResetTemperature();
+        }
+    }
+
     private void UpdateHungerAndThirst()
     {
         hunger -= hungerDrainRate * Time.deltaTime;
@@ -154,7 +198,15 @@ public class PlayerStatus : MonoBehaviour
 
     private void UpdateTemperature()
     {
-        // Temperatura ambiente varia com o ciclo dia/noite
+        // Se BodyTemperatureSystem estiver ativo, ele governa a temperatura corporal central autoritativamente
+        if (BodyTemperatureSystem.Instance != null)
+        {
+            bodyTemperature = BodyTemperatureSystem.Instance.currentTemperature;
+            isFreezing = bodyTemperature <= BodyTemperatureSystem.TIER1_SHIVER_TEMP;
+            return;
+        }
+
+        // Fallback legado caso BodyTemperatureSystem não esteja presente
         float targetTemp = ambientDayTemp;
         if (dayNightCycle != null)
         {
@@ -162,24 +214,21 @@ public class PlayerStatus : MonoBehaviour
             targetTemp = isNight ? ambientNightTemp : ambientDayTemp;
         }
 
-        // --- NOVO: Isolamento Termico (Equipamento Passivo na Mochila) ---
+        // --- Isolamento Termico (Equipamento Passivo na Mochila) ---
         bool hasAnimalSkin = inventoryCache != null && inventoryCache.HasItem(105); // 105 = Pele de Animal
 
-        if (hasAnimalSkin && targetTemp < coldThreshold)
+        if (hasAnimalSkin && targetTemp < 5f)
         {
-            targetTemp = coldThreshold + 1f; // Mitiga o frio, impedindo que a temperatura baixe do cold threshold
+            targetTemp = 6f;
         }
 
-        // Bonus de fogueira
         if (isNearBonfire)
         {
             targetTemp += bonfireWarmth;
         }
 
-        // Interpolar suavemente a temperatura corporal
         bodyTemperature = Mathf.Lerp(bodyTemperature, targetTemp, 0.5f * Time.deltaTime);
-
-        isFreezing = bodyTemperature < coldThreshold;
+        isFreezing = bodyTemperature < 5f;
 
         if (isFreezing)
         {
@@ -188,7 +237,7 @@ public class PlayerStatus : MonoBehaviour
         }
     }
     
-    // MÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©todo separado para nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o engatilhar a vibraÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o e o flash a cada frame
+    // Metodo separado para nao engatilhar a vibracao e o flash a cada frame
     public void TakeDamagePassive(float amount)
     {
         if (isDead) return;
@@ -198,6 +247,19 @@ public class PlayerStatus : MonoBehaviour
 
     private void UpdateStamina()
     {
+        // Suporte a Sprint no PC via tecla Shift
+        if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
+        {
+            if (stamina > 5f && playerController != null && playerController.IsMoving)
+            {
+                isSprinting = true;
+            }
+        }
+        else if (Input.GetKeyUp(KeyCode.LeftShift) || Input.GetKeyUp(KeyCode.RightShift))
+        {
+            isSprinting = false;
+        }
+
         if (isSprinting && stamina > 0f)
         {
             stamina -= staminaDrainRate * Time.deltaTime;

@@ -1,10 +1,15 @@
 using UnityEngine;
 
+/// <summary>
+/// Diretor de Tensão e Hordas da Noite.
+/// Constrói tensão atmosférica ao longo da noite e dispara incursões controladas de Vultos,
+/// permitindo que o jogador se defenda com tochas, fogueiras e machado.
+/// </summary>
 public class HordeDirector : MonoBehaviour
 {
     [Header("Director Settings")]
     public float baseTension = 0f;
-    public float tensionBuildRate = 1f; // Tensão aumenta a cada segundo da noite
+    public float tensionBuildRate = 0.20f; // Tensão gradual e equilibrada (levará vários minutos de noite)
     public float hordeThreshold = 100f;
 
     [Header("Dependencies")]
@@ -18,12 +23,11 @@ public class HordeDirector : MonoBehaviour
     {
         if (dayNightCycle == null || vultoManager == null) return;
 
-        bool isNight = dayNightCycle.currentTime >= 19f || dayNightCycle.currentTime < 6f;
+        bool isNight = dayNightCycle.currentTime >= 20f || dayNightCycle.currentTime < 5.5f;
 
         if (isNight)
         {
-            // Tensão aumenta mais rapidamente se a sanidade estiver baixa
-            float sanityMod = (playerSanity != null && playerSanity.sanity < 50f) ? 2f : 1f;
+            float sanityMod = (playerSanity != null && playerSanity.sanity < 40f) ? 1.5f : 1f;
             baseTension += tensionBuildRate * sanityMod * Time.deltaTime;
 
             if (baseTension >= hordeThreshold && !isHordeActive)
@@ -41,17 +45,17 @@ public class HordeDirector : MonoBehaviour
     private void TriggerHorde()
     {
         isHordeActive = true;
-        baseTension = 0f; // Reset tensão para a próxima onda
-        Debug.Log("[HordeDirector] Tensão máxima atingida! Onda de Vultos a spawnar.");
+        baseTension = 0f;
+        Debug.Log("[HordeDirector] Tensão máxima da noite! Pequeno grupo de Vultos avistado nas sombras.");
 
-        // Spawn agressivo na borda do Flow Field
-        int spawnCount = Random.Range(10, 25);
-        for (int i = 0; i < spawnCount; i++)
+        if (playerSanity != null)
         {
-            Vector2 randomDir = Random.insideUnitCircle.normalized * 25f;
-            vultoManager.SpawnVulto(playerSanity.transform.position.x + randomDir.x, playerSanity.transform.position.z + randomDir.y);
+            int spawnCount = Random.Range(2, 5); // Incursão equilibrada para permitir combate justo
+            for (int i = 0; i < spawnCount; i++)
+            {
+                Vector2 randomDir = Random.insideUnitCircle.normalized * Random.Range(25f, 35f);
+                vultoManager.SpawnVulto(playerSanity.transform.position.x + randomDir.x, playerSanity.transform.position.z + randomDir.y);
+            }
         }
-
-        // Eventualmente poderíamos tocar um som de "Horda" no AudioManager
     }
 }

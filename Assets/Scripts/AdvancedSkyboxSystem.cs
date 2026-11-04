@@ -24,13 +24,100 @@ public class AdvancedSkyboxSystem : MonoBehaviour
         CreateMoon();
     }
 
+    // Aurora Boreal
+    private ParticleSystem auroraParticles;
+    public PlayerStatus playerStatusRef; // Para verificar temperatura
+
     private void CreateSkybox()
     {
-        skyboxMat = new Material(Shader.Find("Skybox/Solid Color"));
-        if (skyboxMat.shader == null) skyboxMat = new Material(Shader.Find("Standard"));
+        // Tenta carregar o skybox procedural (gradiente)
+        skyboxMat = new Material(Shader.Find("Skybox/Procedural"));
+        if (skyboxMat == null || skyboxMat.shader == null || skyboxMat.shader.name == "Hidden/InternalErrorShader")
+        {
+            // Fallback para cor sÃ³lida
+            skyboxMat = new Material(Shader.Find("Skybox/Solid Color"));
+            if (skyboxMat.shader == null) skyboxMat = new Material(Shader.Find("Standard"));
+        }
+        else
+        {
+            // Configurar o skybox procedural
+            skyboxMat.SetFloat("_SunSize", 0.04f);
+            skyboxMat.SetFloat("_SunSizeConvergence", 5f);
+            skyboxMat.SetFloat("_AtmosphereThickness", 1.2f);
+            skyboxMat.SetFloat("_Exposure", 1.35f);
+        }
         
         RenderSettings.skybox = skyboxMat;
         DynamicGI.UpdateEnvironment();
+
+        // Criar aurora boreal
+        CreateAuroraBorealis();
+    }
+
+    private void CreateAuroraBorealis()
+    {
+        GameObject auroraObj = new GameObject("VFX_AuroraBorealis");
+        auroraObj.transform.SetParent(transform);
+        auroraParticles = auroraObj.AddComponent<ParticleSystem>();
+
+        var main = auroraParticles.main;
+        main.duration = 20f;
+        main.loop = true;
+        main.startLifetime = new ParticleSystem.MinMaxCurve(8f, 15f);
+        main.startSpeed = 0.1f;
+        main.startSize = new ParticleSystem.MinMaxCurve(30f, 60f);
+        main.startColor = new ParticleSystem.MinMaxGradient(
+            new Color(0.1f, 0.8f, 0.3f, 0.04f),  // Verde aurora
+            new Color(0.2f, 0.4f, 0.9f, 0.03f)    // Azul aurora
+        );
+        main.maxParticles = 40;
+        main.simulationSpace = ParticleSystemSimulationSpace.World;
+
+        var emission = auroraParticles.emission;
+        emission.rateOverTime = 3f;
+
+        var shape = auroraParticles.shape;
+        shape.shapeType = ParticleSystemShapeType.Box;
+        shape.scale = new Vector3(200f, 5f, 100f);
+
+        // Movimento ondulante
+        var noise = auroraParticles.noise;
+        noise.enabled = true;
+        noise.strength = 0.2f;
+        noise.frequency = 0.1f;
+        noise.scrollSpeed = 0.05f;
+
+        var colorOverLifetime = auroraParticles.colorOverLifetime;
+        colorOverLifetime.enabled = true;
+        Gradient g = new Gradient();
+        g.SetKeys(
+            new GradientColorKey[] {
+                new GradientColorKey(new Color(0.1f, 0.9f, 0.3f), 0f),
+                new GradientColorKey(new Color(0.2f, 0.5f, 0.9f), 0.5f),
+                new GradientColorKey(new Color(0.5f, 0.2f, 0.8f), 1f)
+            },
+            new GradientAlphaKey[] {
+                new GradientAlphaKey(0f, 0f),
+                new GradientAlphaKey(0.04f, 0.3f),
+                new GradientAlphaKey(0.04f, 0.7f),
+                new GradientAlphaKey(0f, 1f)
+            }
+        );
+        colorOverLifetime.color = g;
+
+        // Renderer
+        var renderer = auroraParticles.GetComponent<ParticleSystemRenderer>();
+        Material auroraMat = new Material(Shader.Find("Universal Render Pipeline/Particles/Unlit"));
+        if (auroraMat.shader == null) auroraMat = new Material(Shader.Find("Particles/Standard Unlit"));
+        auroraMat.color = new Color(0.2f, 0.8f, 0.4f, 0.04f);
+        auroraMat.SetFloat("_Surface", 1);
+        auroraMat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+        auroraMat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.One); // Additive blending
+        auroraMat.renderQueue = 2900;
+        renderer.material = auroraMat;
+        renderer.renderMode = ParticleSystemRenderMode.HorizontalBillboard;
+
+        auroraParticles.Stop();
     }
 
     private void CreateStars()
@@ -134,14 +221,29 @@ public class AdvancedSkyboxSystem : MonoBehaviour
             targetColor = nightSkyColor;
         }
 
+        bool isNight = time >= 19f || time < 5f;
+
         if (skyboxMat != null)
         {
             if (skyboxMat.HasProperty("_Color")) skyboxMat.SetColor("_Color", targetColor);
             if (skyboxMat.HasProperty("_Tint")) skyboxMat.SetColor("_Tint", targetColor);
+            
+            // Skybox Procedural: Ajustar atmosfera e exposiÃ§Ã£o dinamicamente
+            if (skyboxMat.HasProperty("_AtmosphereThickness"))
+            {
+                float thickness = isNight ? 0.4f : 1.2f;
+                if (time >= 17f && time < 20f) thickness = Mathf.Lerp(1.2f, 0.4f, (time - 17f) / 3f);
+                else if (time >= 4f && time < 8f) thickness = Mathf.Lerp(0.4f, 1.2f, (time - 4f) / 4f);
+                skyboxMat.SetFloat("_AtmosphereThickness", thickness);
+            }
+            if (skyboxMat.HasProperty("_Exposure"))
+            {
+                float exposure = isNight ? 0.65f : 1.35f;
+                skyboxMat.SetFloat("_Exposure", exposure);
+            }
         }
 
         // 2. Estrelas
-        bool isNight = time >= 19f || time < 5f;
         if (starParticles != null)
         {
             if (isNight && !starParticles.isPlaying) starParticles.Play();
@@ -176,5 +278,34 @@ public class AdvancedSkyboxSystem : MonoBehaviour
                 if (moonObject.activeSelf) moonObject.SetActive(false);
             }
         }
+
+        // 4. Aurora Boreal (noites frias)
+        UpdateAurora(isNight);
+    }
+
+    private void UpdateAurora(bool isNight)
+    {
+        if (auroraParticles == null || playerTransform == null) return;
+
+        // Aurora aparece em noites quando a temperatura Ã© baixa
+        bool shouldShowAurora = isNight;
+
+        // Se tivermos referÃªncia ao PlayerStatus, verificar temperatura
+        if (playerStatusRef != null)
+        {
+            shouldShowAurora = isNight && playerStatusRef.bodyTemperature < 35f;
+        }
+
+        if (shouldShowAurora)
+        {
+            if (!auroraParticles.isPlaying) auroraParticles.Play();
+            // Posicionar a aurora no cÃ©u acima do jogador
+            auroraParticles.transform.position = playerTransform.position + new Vector3(0, 120f, 50f);
+        }
+        else
+        {
+            if (auroraParticles.isPlaying) auroraParticles.Stop();
+        }
     }
 }
+

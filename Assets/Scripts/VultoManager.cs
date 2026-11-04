@@ -25,12 +25,12 @@ public class VultoManager : MonoBehaviour
 
     [Header("Combat")]
     public float attackRadius = 1.2f;
-    public float attackDamage = 10f;
+    public float attackDamage = 5f;
     public float attackCooldown = 1.5f;
     private float nextAttackTime = 0f;
     
     [Header("Advanced AI")]
-    public float teleportCooldown = 15f;
+    public float teleportCooldown = 45f;
     public float teleportRange = 5f;
     public float ambushDaySpeedMult = 0.1f; // Quase parados de dia
     private float lastTeleportTime = -20f;
@@ -95,6 +95,22 @@ public class VultoManager : MonoBehaviour
         {
             pStatus = playerTransform.GetComponent<PlayerStatus>();
             pController = playerTransform.GetComponent<PlayerController>();
+        }
+    }
+
+    
+    public void ClearNearbyVultos(Vector3 center, float radius)
+    {
+        float sqrRad = radius * radius;
+        for (int i = 0; i < currentActiveVultos; i++)
+        {
+            float dx = posXArray[i] - center.x;
+            float dz = posYArray[i] - center.z;
+            if (dx * dx + dz * dz <= sqrRad)
+            {
+                DespawnVultoAt(i);
+                i--;
+            }
         }
     }
 
@@ -177,7 +193,7 @@ public class VultoManager : MonoBehaviour
         }
 
         // === TELEPORTE SOMBRIO ===
-        if (isNight && Time.time - lastTeleportTime > teleportCooldown && currentActiveVultos > 0)
+        if (isNight && sanityLow && Time.time - lastTeleportTime > teleportCooldown && currentActiveVultos > 0)
         {
             // Escolher um vulto aleatorio que esteja longe do jogador
             int chosen = Random.Range(0, currentActiveVultos);

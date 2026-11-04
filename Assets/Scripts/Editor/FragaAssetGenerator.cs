@@ -1,12 +1,11 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEditor;
 
 public class FragaAssetGenerator : MonoBehaviour
 {
-    [MenuItem("Fraga Native/0. Gerar Modelos 3D (Estilo Low Poly)")]
+    [MenuItem("Fraga Native/3. Gerar Modelos 3D e Prefabs")]
     public static void GenerateAssets()
     {
-        GenerateBarricadePrefab("Assets/Resources/Prefabs");
         string prefabsDir = "Assets/Resources/Prefabs";
         if (!AssetDatabase.IsValidFolder("Assets/Resources"))
         {
@@ -16,6 +15,9 @@ public class FragaAssetGenerator : MonoBehaviour
         {
             AssetDatabase.CreateFolder("Assets/Resources", "Prefabs");
         }
+
+        // Garante geracao previa de materiais PBR e texturas procedurais
+        ProceduralMaterialGenerator.GenerateMaterials();
 
         GenerateTreePrefab(prefabsDir);
         GenerateRockPrefab(prefabsDir);
@@ -27,6 +29,9 @@ public class FragaAssetGenerator : MonoBehaviour
         
         GenerateWolfPrefab(prefabsDir);
         GenerateDeerPrefab(prefabsDir);
+        GenerateBearPrefab(prefabsDir);
+        GenerateBoarPrefab(prefabsDir);
+        GenerateRuinPrefab(prefabsDir);
         
         GenerateBossPrefab(prefabsDir);
         GenerateAltarPrefab(prefabsDir);
@@ -46,7 +51,6 @@ public class FragaAssetGenerator : MonoBehaviour
         GeneratePondPrefab(prefabsDir);
         
         GenerateHoePrefab(prefabsDir);
-        GenerateHoePrefab(prefabsDir);
         GenerateCauldronPrefab(prefabsDir);
         GenerateRabbitPrefab(prefabsDir);
         GenerateFarmlandPrefab(prefabsDir);
@@ -61,12 +65,17 @@ public class FragaAssetGenerator : MonoBehaviour
         GenerateCelticCrossPrefab(prefabsDir);
         GenerateAncientGravePrefab(prefabsDir);
 
+        // Sub-bosque e vegetacao Galega
+        GenerateFentoPrefab(prefabsDir);
+
         // Loop 13: Novos Modelos
         GenerateDeadTreePrefab(prefabsDir);
         GeneratePineTreePrefab(prefabsDir);
         GenerateStalkerPrefab(prefabsDir);
         
         GenerateFarolCeltaPrefab(prefabsDir);
+
+        FragaModelBridge.SyncExternalModels();
 
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
@@ -76,28 +85,103 @@ public class FragaAssetGenerator : MonoBehaviour
 
     private static void GenerateTreePrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Trees/Oak_Tree.obj")) return;
         GameObject treeObj = new GameObject("Tree_Prefab");
-        
-        // Tronco
-        GameObject trunk = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        trunk.transform.SetParent(treeObj.transform);
-        trunk.transform.localPosition = new Vector3(0, 0.5f, 0);
-        trunk.transform.localScale = new Vector3(0.3f, 0.5f, 0.3f);
-        SetColor(trunk, new Color(0.25f, 0.15f, 0.05f), "Mat_DarkForest_Bark");
 
-        // Folhas (3 Cones invertidos estilizados)
-        for(int i = 0; i < 3; i++)
+        // 1. Raízes superficiais que se cravam no solo de turfa da Galícia
+        for (int i = 0; i < 4; i++)
         {
-            GameObject leaves = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            leaves.transform.SetParent(treeObj.transform);
-            float scale = 1.6f - (i * 0.4f);
-            leaves.transform.localScale = new Vector3(scale, scale, scale);
-            leaves.transform.localPosition = new Vector3(0, 1.0f + (i * 0.7f), 0);
-            leaves.transform.localRotation = Quaternion.Euler(45, 45, 45); 
-            SetColor(leaves, new Color(0.1f, 0.35f, 0.15f), "Mat_FoliageSway"); 
+            float angle = i * 90f + Random.Range(-12f, 12f);
+            Quaternion rot = Quaternion.Euler(32f, angle, 0f);
+            Vector3 offset = Quaternion.Euler(0, angle, 0) * new Vector3(0, 0, 0.42f);
+
+            GameObject root = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            root.name = "Root_" + i;
+            root.transform.SetParent(treeObj.transform);
+            root.transform.localPosition = new Vector3(offset.x, 0.12f, offset.z);
+            root.transform.localScale = new Vector3(0.24f, 0.42f, 0.22f);
+            root.transform.localRotation = rot;
+            SetColor(root, new Color(0.22f, 0.15f, 0.08f), "Mat_DarkForest_Bark");
         }
 
-        ApplyOrganicNoiseToMesh(treeObj, 0.15f, 2.5f);
+        // 2. Base do Tronco robusta (Carballo ancestral)
+        GameObject trunkBase = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        trunkBase.name = "Trunk_Base";
+        trunkBase.transform.SetParent(treeObj.transform);
+        trunkBase.transform.localPosition = new Vector3(0, 0.8f, 0);
+        trunkBase.transform.localScale = new Vector3(0.68f, 0.8f, 0.65f);
+        SetColor(trunkBase, new Color(0.24f, 0.16f, 0.08f), "Mat_DarkForest_Bark");
+
+        // 3. Tronco Médio com curvatura orgânica
+        GameObject trunkMid = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        trunkMid.name = "Trunk_Mid";
+        trunkMid.transform.SetParent(treeObj.transform);
+        trunkMid.transform.localPosition = new Vector3(0.04f, 2.1f, 0.03f);
+        trunkMid.transform.localScale = new Vector3(0.52f, 0.75f, 0.5f);
+        trunkMid.transform.localRotation = Quaternion.Euler(4f, 22f, -3f);
+        SetColor(trunkMid, new Color(0.24f, 0.16f, 0.08f), "Mat_DarkForest_Bark");
+
+        // 4. Tronco Superior
+        GameObject trunkTop = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        trunkTop.name = "Trunk_Top";
+        trunkTop.transform.SetParent(treeObj.transform);
+        trunkTop.transform.localPosition = new Vector3(0.08f, 3.2f, 0.05f);
+        trunkTop.transform.localScale = new Vector3(0.4f, 0.65f, 0.38f);
+        trunkTop.transform.localRotation = Quaternion.Euler(-5f, -18f, 4f);
+        SetColor(trunkTop, new Color(0.24f, 0.16f, 0.08f), "Mat_DarkForest_Bark");
+
+        // 5. Galhos Mestres (4 Boughs robustos espalhados)
+        float[] boughYaws = { 25f, 115f, 205f, 295f };
+        float[] boughPitches = { 38f, 44f, 36f, 42f };
+        float[] boughLengths = { 1.45f, 1.35f, 1.55f, 1.4f };
+
+        for (int b = 0; b < 4; b++)
+        {
+            GameObject bough = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            bough.name = "Bough_" + b;
+            bough.transform.SetParent(treeObj.transform);
+            Quaternion boughRot = Quaternion.Euler(boughPitches[b], boughYaws[b], 0);
+            Vector3 dirBough = boughRot * Vector3.up;
+            bough.transform.localPosition = new Vector3(0.08f, 2.8f, 0.05f) + dirBough * (boughLengths[b] * 0.5f);
+            bough.transform.localScale = new Vector3(0.18f, boughLengths[b] * 0.5f, 0.18f);
+            bough.transform.localRotation = boughRot;
+            SetColor(bough, new Color(0.22f, 0.15f, 0.08f), "Mat_DarkForest_Bark");
+
+            // Copa de folhas densa na extremidade
+            Vector3 tipPos = new Vector3(0.08f, 2.8f, 0.05f) + dirBough * boughLengths[b];
+            for (int f = 0; f < 2; f++)
+            {
+                GameObject leafCluster = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                leafCluster.name = "LeafCluster_" + b + "_" + f;
+                leafCluster.transform.SetParent(treeObj.transform);
+                Vector3 jitter = new Vector3(Random.Range(-0.25f, 0.25f), Random.Range(-0.15f, 0.25f), Random.Range(-0.25f, 0.25f));
+                leafCluster.transform.localPosition = tipPos + jitter;
+                float foliageScale = Random.Range(1.4f, 1.8f);
+                leafCluster.transform.localScale = new Vector3(foliageScale * 1.2f, foliageScale * 0.8f, foliageScale * 1.15f);
+                leafCluster.transform.localRotation = Quaternion.Euler(Random.Range(-20, 20), Random.Range(0, 360), Random.Range(-20, 20));
+                SetColor(leafCluster, new Color(0.14f, 0.36f, 0.13f), "Mat_FoliageSway");
+            }
+        }
+
+        // 6. Copa Central Superior Densa
+        for (int c = 0; c < 3; c++)
+        {
+            GameObject crown = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            crown.name = "CrownCluster_" + c;
+            crown.transform.SetParent(treeObj.transform);
+            crown.transform.localPosition = new Vector3(Random.Range(-0.25f, 0.25f), 3.9f + (c * 0.45f), Random.Range(-0.25f, 0.25f));
+            float crownScale = 2.1f - (c * 0.3f);
+            crown.transform.localScale = new Vector3(crownScale * 1.2f, crownScale * 0.8f, crownScale * 1.2f);
+            crown.transform.localRotation = Quaternion.Euler(Random.Range(-15, 15), Random.Range(0, 360), Random.Range(-15, 15));
+            SetColor(crown, new Color(0.12f, 0.34f, 0.12f), "Mat_FoliageSway");
+        }
+
+        ApplyOrganicNoiseToMesh(treeObj, 0.18f, 2.0f);
+
+        CapsuleCollider coll = treeObj.AddComponent<CapsuleCollider>();
+        coll.radius = 0.45f;
+        coll.height = 3.6f;
+        coll.center = new Vector3(0, 1.8f, 0);
 
         PrefabUtility.SaveAsPrefabAsset(treeObj, dir + "/Tree_Prefab.prefab");
         DestroyImmediate(treeObj);
@@ -105,28 +189,38 @@ public class FragaAssetGenerator : MonoBehaviour
 
     private static void GenerateDeadTreePrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Trees/Dead_Tree.obj")) return;
         GameObject treeObj = new GameObject("DeadTree_Prefab");
-        
-        GameObject trunk = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        trunk.transform.SetParent(treeObj.transform);
-        trunk.transform.localPosition = new Vector3(0, 1.5f, 0);
-        trunk.transform.localScale = new Vector3(0.2f, 1.5f, 0.2f);
-        trunk.transform.localRotation = Quaternion.Euler(0, 0, 5);
-        SetColor(trunk, new Color(0.15f, 0.1f, 0.05f), "Mat_DarkForest_Bark");
 
-        for(int i = 0; i < 4; i++)
+        // Tronco retorcido e partido
+        GameObject trunk = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        trunk.name = "Trunk";
+        trunk.transform.SetParent(treeObj.transform);
+        trunk.transform.localPosition = new Vector3(0, 1.6f, 0);
+        trunk.transform.localScale = new Vector3(0.32f, 1.6f, 0.32f);
+        trunk.transform.localRotation = Quaternion.Euler(0, 15, 6);
+        SetColor(trunk, new Color(0.18f, 0.14f, 0.1f), "Mat_DarkForest_Bark");
+
+        // 5 Galhos secos e retorcidos
+        float[] branchAnglesY = { 20f, 95f, 175f, 250f, 320f };
+        float[] branchAnglesZ = { 42f, -38f, 48f, -44f, 35f };
+        for (int i = 0; i < 5; i++)
         {
             GameObject branch = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            branch.name = "DeadBranch_" + i;
             branch.transform.SetParent(treeObj.transform);
-            branch.transform.localScale = new Vector3(0.05f, 0.8f, 0.05f);
-            branch.transform.localPosition = new Vector3(0, 1.0f + (i * 0.5f), 0);
-            float angleZ = (i % 2 == 0) ? 45 : -45;
-            float angleY = i * 90;
-            branch.transform.localRotation = Quaternion.Euler(0, angleY, angleZ);
-            SetColor(branch, new Color(0.15f, 0.1f, 0.05f), "Mat_DarkForest_Bark");
+            branch.transform.localScale = new Vector3(0.09f, 0.9f, 0.09f);
+            branch.transform.localPosition = new Vector3(0, 1.5f + (i * 0.45f), 0);
+            branch.transform.localRotation = Quaternion.Euler(Random.Range(-15, 15), branchAnglesY[i], branchAnglesZ[i]);
+            SetColor(branch, new Color(0.16f, 0.12f, 0.08f), "Mat_DarkForest_Bark");
         }
 
-        ApplyOrganicNoiseToMesh(treeObj, 0.2f, 3.0f);
+        ApplyOrganicNoiseToMesh(treeObj, 0.22f, 2.5f);
+
+        CapsuleCollider coll = treeObj.AddComponent<CapsuleCollider>();
+        coll.radius = 0.35f;
+        coll.height = 3.6f;
+        coll.center = new Vector3(0, 1.8f, 0);
 
         PrefabUtility.SaveAsPrefabAsset(treeObj, dir + "/DeadTree_Prefab.prefab");
         DestroyImmediate(treeObj);
@@ -134,35 +228,63 @@ public class FragaAssetGenerator : MonoBehaviour
 
     private static void GeneratePineTreePrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Trees/Pine_Tree.obj")) return;
         GameObject treeObj = new GameObject("PineTree_Prefab");
-        
+
+        // Tronco esguio e alto
         GameObject trunk = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        trunk.name = "Trunk";
         trunk.transform.SetParent(treeObj.transform);
-        trunk.transform.localPosition = new Vector3(0, 1f, 0);
-        trunk.transform.localScale = new Vector3(0.3f, 1f, 0.3f);
-        SetColor(trunk, new Color(0.25f, 0.15f, 0.05f));
+        trunk.transform.localPosition = new Vector3(0, 2.6f, 0);
+        trunk.transform.localScale = new Vector3(0.35f, 2.6f, 0.35f);
+        SetColor(trunk, new Color(0.25f, 0.16f, 0.08f), "Mat_DarkForest_Bark");
 
-        for(int i = 0; i < 4; i++)
+        // 5 Camadas (Whorls) de galhos e agulhas
+        int tiers = 5;
+        for (int t = 0; t < tiers; t++)
         {
-            GameObject leaves = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            MeshFilter mf = leaves.GetComponent<MeshFilter>();
-            
-            // Hack para fazer um cone
-            Mesh m = Instantiate(mf.sharedMesh);
-            Vector3[] verts = m.vertices;
-            for(int v=0; v<verts.Length; v++) {
-                if(verts[v].y > 0) verts[v] = new Vector3(0, verts[v].y, 0);
-            }
-            m.vertices = verts;
-            m.RecalculateNormals();
-            mf.sharedMesh = m;
+            float height = 1.8f + (t * 0.75f);
+            float radius = 1.6f - (t * 0.26f);
+            float needleScale = 1.8f - (t * 0.28f);
 
-            leaves.transform.SetParent(treeObj.transform);
-            float scale = 1.5f - (i * 0.3f);
-            leaves.transform.localScale = new Vector3(scale, 1.2f, scale);
-            leaves.transform.localPosition = new Vector3(0, 1.5f + (i * 0.8f), 0);
-            SetColor(leaves, new Color(0.05f, 0.25f, 0.1f));
+            // Galhos radiais
+            for (int b = 0; b < 4; b++)
+            {
+                float angle = b * 90f + (t * 35f);
+                GameObject branch = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                branch.name = "Branch_" + t + "_" + b;
+                branch.transform.SetParent(treeObj.transform);
+                Quaternion rot = Quaternion.Euler(75f, angle, 0);
+                branch.transform.localRotation = rot;
+                Vector3 dirVec = rot * Vector3.up;
+                branch.transform.localPosition = new Vector3(0, height, 0) + dirVec * (radius * 0.4f);
+                branch.transform.localScale = new Vector3(0.08f, radius * 0.45f, 0.08f);
+                SetColor(branch, new Color(0.22f, 0.14f, 0.07f), "Mat_DarkForest_Bark");
+            }
+
+            // Agulhas da camada
+            GameObject needles = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            needles.name = "Needles_" + t;
+            needles.transform.SetParent(treeObj.transform);
+            needles.transform.localPosition = new Vector3(0, height + 0.2f, 0);
+            needles.transform.localScale = new Vector3(needleScale, 0.35f, needleScale);
+            SetColor(needles, new Color(0.08f, 0.26f, 0.11f), "Mat_FoliageSway");
         }
+
+        // Topo cônico
+        GameObject topCrown = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        topCrown.name = "Pine_TopCrown";
+        topCrown.transform.SetParent(treeObj.transform);
+        topCrown.transform.localPosition = new Vector3(0, 5.5f, 0);
+        topCrown.transform.localScale = new Vector3(0.7f, 1.2f, 0.7f);
+        SetColor(topCrown, new Color(0.09f, 0.28f, 0.12f), "Mat_FoliageSway");
+
+        ApplyOrganicNoiseToMesh(treeObj, 0.12f, 2.5f);
+
+        CapsuleCollider coll = treeObj.AddComponent<CapsuleCollider>();
+        coll.radius = 0.35f;
+        coll.height = 5.6f;
+        coll.center = new Vector3(0, 2.8f, 0);
 
         PrefabUtility.SaveAsPrefabAsset(treeObj, dir + "/PineTree_Prefab.prefab");
         DestroyImmediate(treeObj);
@@ -170,17 +292,51 @@ public class FragaAssetGenerator : MonoBehaviour
 
         private static void GenerateRockPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Rocks/Granite_Rock.obj")) return;
         GameObject rockObj = new GameObject("Rock_Prefab");
-        
-        for(int i=0; i<4; i++) {
-            GameObject stone = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            stone.transform.SetParent(rockObj.transform);
-            stone.transform.localPosition = new Vector3(Random.Range(-0.3f, 0.3f), Random.Range(0.2f, 0.5f), Random.Range(-0.3f, 0.3f));
-            stone.transform.localScale = new Vector3(Random.Range(0.5f, 1.2f), Random.Range(0.4f, 0.8f), Random.Range(0.5f, 1.2f));
-            stone.transform.localRotation = Quaternion.Euler(Random.Range(0, 360), Random.Range(0, 360), Random.Range(0, 360));
-            SetColor(stone, new Color(0.4f, 0.4f, 0.4f), "Ruin_Stones", "ruin_stones");
-        }
-        
+
+        // Bloco de granito central principal
+        GameObject mainStone = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        mainStone.name = "Main_Granite";
+        mainStone.transform.SetParent(rockObj.transform);
+        mainStone.transform.localPosition = new Vector3(0, 0.6f, 0);
+        mainStone.transform.localScale = new Vector3(1.35f, 1.15f, 1.25f);
+        mainStone.transform.localRotation = Quaternion.Euler(7f, 25f, -5f);
+        SetColor(mainStone, new Color(0.42f, 0.42f, 0.45f), "Celtic_Stone", "celtic_stone");
+
+        // Bloco flanqueador esquerdo
+        GameObject stoneL = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        stoneL.name = "Flank_Left";
+        stoneL.transform.SetParent(rockObj.transform);
+        stoneL.transform.localPosition = new Vector3(-0.65f, 0.4f, 0.2f);
+        stoneL.transform.localScale = new Vector3(0.95f, 0.8f, 0.85f);
+        stoneL.transform.localRotation = Quaternion.Euler(-12f, 65f, 15f);
+        SetColor(stoneL, new Color(0.40f, 0.40f, 0.43f), "Celtic_Stone", "celtic_stone");
+
+        // Bloco flanqueador direito
+        GameObject stoneR = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        stoneR.name = "Flank_Right";
+        stoneR.transform.SetParent(rockObj.transform);
+        stoneR.transform.localPosition = new Vector3(0.7f, 0.45f, -0.15f);
+        stoneR.transform.localScale = new Vector3(1.05f, 0.85f, 0.95f);
+        stoneR.transform.localRotation = Quaternion.Euler(15f, -40f, -10f);
+        SetColor(stoneR, new Color(0.43f, 0.43f, 0.46f), "Celtic_Stone", "celtic_stone");
+
+        // Laje rasa de base com musgo denso
+        GameObject stoneBase = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        stoneBase.name = "Base_Slab";
+        stoneBase.transform.SetParent(rockObj.transform);
+        stoneBase.transform.localPosition = new Vector3(0.1f, 0.18f, -0.4f);
+        stoneBase.transform.localScale = new Vector3(1.1f, 0.35f, 0.95f);
+        stoneBase.transform.localRotation = Quaternion.Euler(-5f, 10f, 3f);
+        SetColor(stoneBase, new Color(0.38f, 0.38f, 0.4f), "Celtic_Stone", "celtic_stone");
+
+        ApplyOrganicNoiseToMesh(rockObj, 0.28f, 1.8f);
+
+        BoxCollider coll = rockObj.AddComponent<BoxCollider>();
+        coll.size = new Vector3(2.3f, 1.25f, 2.1f);
+        coll.center = new Vector3(0.05f, 0.6f, 0);
+
         PrefabUtility.SaveAsPrefabAsset(rockObj, dir + "/Rock_Prefab.prefab");
         DestroyImmediate(rockObj);
     }
@@ -314,10 +470,43 @@ public class FragaAssetGenerator : MonoBehaviour
 
     private static void GenerateHerbPrefab(string dir)
     {
-        GameObject herbObj = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        herbObj.name = "Herb_Prefab";
-        herbObj.transform.localScale = new Vector3(0.3f, 0.5f, 0.3f);
-        SetColor(herbObj, new Color(0.2f, 0.8f, 0.2f));
+        GameObject herbObj = new GameObject("Herb_Prefab");
+
+        // Talo central flexível
+        GameObject stem = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        stem.name = "Stem";
+        stem.transform.SetParent(herbObj.transform);
+        stem.transform.localPosition = new Vector3(0, 0.22f, 0);
+        stem.transform.localScale = new Vector3(0.025f, 0.22f, 0.025f);
+        stem.transform.localRotation = Quaternion.Euler(5f, 0, 3f);
+        SetColor(stem, new Color(0.2f, 0.5f, 0.15f), "Mat_FoliageSway");
+
+        // 3 Pares de folhas opostas (Hierba de San Juan)
+        for (int i = 0; i < 3; i++)
+        {
+            float yPos = 0.12f + (i * 0.12f);
+            for (int side = -1; side <= 1; side += 2)
+            {
+                GameObject leaf = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                leaf.name = "Leaf_" + i + "_" + (side > 0 ? "R" : "L");
+                leaf.transform.SetParent(herbObj.transform);
+                leaf.transform.localPosition = new Vector3(side * 0.08f, yPos, 0);
+                leaf.transform.localScale = new Vector3(0.12f, 0.02f, 0.06f);
+                leaf.transform.localRotation = Quaternion.Euler(15f, side * 30f, side * -20f);
+                SetColor(leaf, new Color(0.25f, 0.65f, 0.2f), "Mat_FoliageSway");
+            }
+        }
+
+        // Flor amarela medicinal no topo
+        GameObject flower = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        flower.name = "Flower";
+        flower.transform.SetParent(herbObj.transform);
+        flower.transform.localPosition = new Vector3(0, 0.46f, 0);
+        flower.transform.localScale = new Vector3(0.08f, 0.06f, 0.08f);
+        SetColor(flower, new Color(1f, 0.85f, 0.1f));
+
+        ApplyOrganicNoiseToMesh(herbObj, 0.06f, 4.0f);
+
         PrefabUtility.SaveAsPrefabAsset(herbObj, dir + "/Herb_Prefab.prefab");
         DestroyImmediate(herbObj);
     }
@@ -325,18 +514,33 @@ public class FragaAssetGenerator : MonoBehaviour
     private static void GenerateMushroomPrefab(string dir)
     {
         GameObject mushObj = new GameObject("Mushroom_Prefab");
-        
-        GameObject stem = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        stem.transform.SetParent(mushObj.transform);
-        stem.transform.localPosition = new Vector3(0, 0.15f, 0);
-        stem.transform.localScale = new Vector3(0.1f, 0.15f, 0.1f);
-        SetColor(stem, Color.white);
 
+        // Haste carnuda com textura esbranquiçada
+        GameObject stem = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        stem.name = "Stem";
+        stem.transform.SetParent(mushObj.transform);
+        stem.transform.localPosition = new Vector3(0, 0.18f, 0);
+        stem.transform.localScale = new Vector3(0.08f, 0.18f, 0.08f);
+        stem.transform.localRotation = Quaternion.Euler(3f, 0, -2f);
+        SetColor(stem, new Color(0.92f, 0.90f, 0.82f));
+
+        // Chapéu convexo silvestre
         GameObject cap = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        cap.name = "Cap";
         cap.transform.SetParent(mushObj.transform);
-        cap.transform.localPosition = new Vector3(0, 0.3f, 0);
-        cap.transform.localScale = new Vector3(0.4f, 0.2f, 0.4f);
-        SetColor(cap, new Color(0.6f, 0.1f, 0.8f));
+        cap.transform.localPosition = new Vector3(0, 0.34f, 0);
+        cap.transform.localScale = new Vector3(0.38f, 0.18f, 0.38f);
+        SetColor(cap, new Color(0.55f, 0.22f, 0.18f));
+
+        // Lamelas inferiores
+        GameObject gills = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        gills.name = "Gills";
+        gills.transform.SetParent(mushObj.transform);
+        gills.transform.localPosition = new Vector3(0, 0.30f, 0);
+        gills.transform.localScale = new Vector3(0.32f, 0.02f, 0.32f);
+        SetColor(gills, new Color(0.85f, 0.80f, 0.72f));
+
+        ApplyOrganicNoiseToMesh(mushObj, 0.08f, 3.5f);
 
         PrefabUtility.SaveAsPrefabAsset(mushObj, dir + "/Mushroom_Prefab.prefab");
         DestroyImmediate(mushObj);
@@ -345,18 +549,35 @@ public class FragaAssetGenerator : MonoBehaviour
     private static void GenerateBerryPrefab(string dir)
     {
         GameObject berryBushObj = new GameObject("Berry_Prefab");
-        
-        GameObject bush = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        bush.transform.SetParent(berryBushObj.transform);
-        bush.transform.localPosition = new Vector3(0, 0.25f, 0);
-        bush.transform.localScale = new Vector3(0.6f, 0.5f, 0.6f);
-        SetColor(bush, new Color(0.1f, 0.4f, 0.1f));
 
-        GameObject berry = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        berry.transform.SetParent(berryBushObj.transform);
-        berry.transform.localPosition = new Vector3(0.2f, 0.3f, 0.2f);
-        berry.transform.localScale = new Vector3(0.1f, 0.1f, 0.1f);
-        SetColor(berry, Color.red);
+        // Folhagem densa do arbusto
+        GameObject bush = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        bush.name = "Bush_Foliage";
+        bush.transform.SetParent(berryBushObj.transform);
+        bush.transform.localPosition = new Vector3(0, 0.3f, 0);
+        bush.transform.localScale = new Vector3(0.75f, 0.6f, 0.75f);
+        SetColor(bush, new Color(0.12f, 0.38f, 0.12f), "Mat_FoliageSway");
+
+        // Bagas silvestres maduras (arándanos / amoras da Galícia)
+        Vector3[] berryPositions = {
+            new Vector3(0.25f, 0.35f, 0.2f),
+            new Vector3(-0.2f, 0.4f, 0.22f),
+            new Vector3(0.1f, 0.45f, -0.28f),
+            new Vector3(-0.25f, 0.3f, -0.15f),
+            new Vector3(0.3f, 0.25f, -0.1f)
+        };
+
+        for (int i = 0; i < berryPositions.Length; i++)
+        {
+            GameObject berry = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            berry.name = "Berry_" + i;
+            berry.transform.SetParent(berryBushObj.transform);
+            berry.transform.localPosition = berryPositions[i];
+            berry.transform.localScale = new Vector3(0.11f, 0.11f, 0.11f);
+            SetColor(berry, new Color(0.18f, 0.05f, 0.28f), "Mat_Meadow_Wildflower");
+        }
+
+        ApplyOrganicNoiseToMesh(berryBushObj, 0.12f, 3.0f);
 
         PrefabUtility.SaveAsPrefabAsset(berryBushObj, dir + "/Berry_Prefab.prefab");
         DestroyImmediate(berryBushObj);
@@ -365,20 +586,58 @@ public class FragaAssetGenerator : MonoBehaviour
     private static void GenerateAxePrefab(string dir)
     {
         GameObject axeObj = new GameObject("Axe_Prefab");
-        
-        // Handle
+
+        // Cabo ergonômico de madeira entalhada (Ash/Freixo)
         GameObject handle = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        handle.name = "Axe_Handle";
         handle.transform.SetParent(axeObj.transform);
         handle.transform.localPosition = new Vector3(0, 0, 0);
-        handle.transform.localScale = new Vector3(0.05f, 0.4f, 0.05f);
-        SetColor(handle, new Color(0.3f, 0.2f, 0.1f));
+        handle.transform.localScale = new Vector3(0.042f, 0.45f, 0.048f);
+        handle.transform.localRotation = Quaternion.Euler(0, 0, 4f);
+        SetColor(handle, new Color(0.32f, 0.22f, 0.12f), "Wood_Bark");
 
-        // Blade
+        // Empunhadura de tiras de couro curtido
+        GameObject grip = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        grip.name = "Leather_Grip";
+        grip.transform.SetParent(axeObj.transform);
+        grip.transform.localPosition = new Vector3(-0.015f, -0.2f, 0);
+        grip.transform.localScale = new Vector3(0.052f, 0.2f, 0.056f);
+        grip.transform.localRotation = Quaternion.Euler(0, 0, 4f);
+        SetColor(grip, new Color(0.22f, 0.14f, 0.08f), "Mat_DarkForest_Bark");
+
+        // Anel de reforço de ferro
+        GameObject ring = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        ring.name = "Iron_Collar";
+        ring.transform.SetParent(axeObj.transform);
+        ring.transform.localPosition = new Vector3(0.018f, 0.32f, 0);
+        ring.transform.localScale = new Vector3(0.055f, 0.035f, 0.06f);
+        SetColor(ring, new Color(0.35f, 0.35f, 0.37f), "Mat_Ruins_Iron");
+
+        // Lâmina de ferro forjado chanfrada (Cutting Bit)
         GameObject blade = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        blade.name = "Axe_Blade";
         blade.transform.SetParent(axeObj.transform);
-        blade.transform.localPosition = new Vector3(0.1f, 0.3f, 0);
-        blade.transform.localScale = new Vector3(0.2f, 0.15f, 0.02f);
-        SetColor(blade, new Color(0.7f, 0.7f, 0.7f)); // Metal/Ferro
+        blade.transform.localPosition = new Vector3(0.12f, 0.38f, 0);
+        blade.transform.localScale = new Vector3(0.18f, 0.14f, 0.024f);
+        blade.transform.localRotation = Quaternion.Euler(0, 0, -8f);
+        SetColor(blade, new Color(0.68f, 0.70f, 0.72f), "Mat_Ruins_Iron");
+
+        // Martelo de trás da machadinha (Poll)
+        GameObject poll = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        poll.name = "Axe_Poll";
+        poll.transform.SetParent(axeObj.transform);
+        poll.transform.localPosition = new Vector3(-0.045f, 0.38f, 0);
+        poll.transform.localScale = new Vector3(0.07f, 0.08f, 0.038f);
+        SetColor(poll, new Color(0.45f, 0.45f, 0.47f), "Mat_Ruins_Iron");
+
+        // Amarração de corda em cruz (Leather Cross-Lashings)
+        GameObject lash1 = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        lash1.name = "Lash_Cross1";
+        lash1.transform.SetParent(axeObj.transform);
+        lash1.transform.localPosition = new Vector3(0.02f, 0.38f, 0);
+        lash1.transform.localScale = new Vector3(0.058f, 0.05f, 0.058f);
+        lash1.transform.localRotation = Quaternion.Euler(35f, 0, 0);
+        SetColor(lash1, new Color(0.28f, 0.20f, 0.12f), "Wood_Bark");
 
         PrefabUtility.SaveAsPrefabAsset(axeObj, dir + "/Axe_Prefab.prefab");
         DestroyImmediate(axeObj);
@@ -387,27 +646,48 @@ public class FragaAssetGenerator : MonoBehaviour
     private static void GenerateTorchPrefab(string dir)
     {
         GameObject torchObj = new GameObject("Torch_Prefab");
-        
-        // Handle
+
+        // Cabo de ramo entalhado orgânico
         GameObject handle = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        handle.name = "Branch_Handle";
         handle.transform.SetParent(torchObj.transform);
         handle.transform.localPosition = new Vector3(0, 0, 0);
-        handle.transform.localScale = new Vector3(0.04f, 0.3f, 0.04f);
-        SetColor(handle, new Color(0.25f, 0.15f, 0.05f));
+        handle.transform.localScale = new Vector3(0.042f, 0.38f, 0.042f);
+        handle.transform.localRotation = Quaternion.Euler(2f, 0, -2f);
+        SetColor(handle, new Color(0.24f, 0.16f, 0.08f), "Mat_DarkForest_Bark");
 
-        // Fire point (To indicate where particle system goes)
+        // Tecido de sarapilheira / juta enrolado na cabeça
+        GameObject cloth = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        cloth.name = "Burlap_Wrap";
+        cloth.transform.SetParent(torchObj.transform);
+        cloth.transform.localPosition = new Vector3(0, 0.32f, 0);
+        cloth.transform.localScale = new Vector3(0.09f, 0.12f, 0.09f);
+        SetColor(cloth, new Color(0.18f, 0.14f, 0.1f));
+
+        // Fios de arame de amarração
+        for (int w = -1; w <= 1; w++)
+        {
+            GameObject wire = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            wire.name = "Wire_Tie_" + w;
+            wire.transform.SetParent(torchObj.transform);
+            wire.transform.localPosition = new Vector3(0, 0.32f + (w * 0.04f), 0);
+            wire.transform.localScale = new Vector3(0.096f, 0.012f, 0.096f);
+            SetColor(wire, new Color(0.4f, 0.38f, 0.35f));
+        }
+
+        // Núcleo em brasa / chama
         GameObject firePoint = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        firePoint.name = "Flame_EmberPoint";
         firePoint.transform.SetParent(torchObj.transform);
-        firePoint.transform.localPosition = new Vector3(0, 0.3f, 0);
-        firePoint.transform.localScale = new Vector3(0.1f, 0.1f, 0.1f);
-        SetColor(firePoint, new Color(1f, 0.5f, 0f)); // Laranja
+        firePoint.transform.localPosition = new Vector3(0, 0.44f, 0);
+        firePoint.transform.localScale = new Vector3(0.11f, 0.15f, 0.11f);
+        SetColor(firePoint, new Color(1f, 0.55f, 0.05f), "Mat_Emissive_Campfire");
 
-        // Attach Light
         Light l = firePoint.AddComponent<Light>();
         l.type = LightType.Point;
-        l.color = new Color(1f, 0.6f, 0.2f);
-        l.range = 8f;
-        l.intensity = 2f;
+        l.color = new Color(1f, 0.65f, 0.25f);
+        l.range = 9.5f;
+        l.intensity = 2.4f;
         l.shadows = LightShadows.Soft;
 
         PrefabUtility.SaveAsPrefabAsset(torchObj, dir + "/Torch_Prefab.prefab");
@@ -417,19 +697,32 @@ public class FragaAssetGenerator : MonoBehaviour
     private static void GeneratePickaxePrefab(string dir)
     {
         GameObject pickaxeObj = new GameObject("Pickaxe_Prefab");
-        
+
+        // Cabo longo de freixo com curva ergonômica
         GameObject handle = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        handle.name = "Handle";
         handle.transform.SetParent(pickaxeObj.transform);
         handle.transform.localPosition = new Vector3(0, 0, 0);
-        handle.transform.localScale = new Vector3(0.05f, 0.45f, 0.05f);
-        SetColor(handle, new Color(0.35f, 0.25f, 0.15f));
+        handle.transform.localScale = new Vector3(0.045f, 0.5f, 0.045f);
+        handle.transform.localRotation = Quaternion.Euler(0, 0, 3f);
+        SetColor(handle, new Color(0.34f, 0.24f, 0.14f), "Wood_Bark");
 
+        // Colar de fixação de ferro
+        GameObject collar = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        collar.name = "Collar";
+        collar.transform.SetParent(pickaxeObj.transform);
+        collar.transform.localPosition = new Vector3(0.018f, 0.36f, 0);
+        collar.transform.localScale = new Vector3(0.06f, 0.05f, 0.06f);
+        SetColor(collar, new Color(0.35f, 0.35f, 0.38f), "Mat_Ruins_Iron");
+
+        // Cabeça dupla forjada (Ponteiro pontiagudo e choupa plana)
         GameObject blade = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+        blade.name = "Pick_Head";
         blade.transform.SetParent(pickaxeObj.transform);
-        blade.transform.localPosition = new Vector3(0, 0.35f, 0);
-        blade.transform.localScale = new Vector3(0.08f, 0.3f, 0.08f);
-        blade.transform.localRotation = Quaternion.Euler(0, 0, 90);
-        SetColor(blade, new Color(0.6f, 0.6f, 0.6f));
+        blade.transform.localPosition = new Vector3(0.018f, 0.42f, 0);
+        blade.transform.localScale = new Vector3(0.065f, 0.38f, 0.065f);
+        blade.transform.localRotation = Quaternion.Euler(0, 0, 84f);
+        SetColor(blade, new Color(0.62f, 0.64f, 0.66f), "Mat_Ruins_Iron");
 
         PrefabUtility.SaveAsPrefabAsset(pickaxeObj, dir + "/Pickaxe_Prefab.prefab");
         DestroyImmediate(pickaxeObj);
@@ -438,30 +731,66 @@ public class FragaAssetGenerator : MonoBehaviour
     private static void GenerateLanternPrefab(string dir)
     {
         GameObject lanternObj = new GameObject("Lantern_Prefab");
-        
+
+        // Base de ferro fundido com reservatório de óleo
         GameObject baseObj = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        baseObj.name = "Oil_Reservoir";
         baseObj.transform.SetParent(lanternObj.transform);
         baseObj.transform.localPosition = new Vector3(0, 0, 0);
-        baseObj.transform.localScale = new Vector3(0.15f, 0.05f, 0.15f);
-        SetColor(baseObj, new Color(0.1f, 0.1f, 0.1f));
-        
+        baseObj.transform.localScale = new Vector3(0.18f, 0.06f, 0.18f);
+        SetColor(baseObj, new Color(0.22f, 0.22f, 0.24f));
+
+        // Chaminé de vidro cilíndrico
         GameObject glassObj = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        glassObj.name = "Glass_Chimney";
         glassObj.transform.SetParent(lanternObj.transform);
-        glassObj.transform.localPosition = new Vector3(0, 0.15f, 0);
-        glassObj.transform.localScale = new Vector3(0.12f, 0.1f, 0.12f);
-        SetColor(glassObj, new Color(1f, 1f, 1f, 0.5f)); // Transparente idealmente
-        
-        GameObject topObj = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        topObj.transform.SetParent(lanternObj.transform);
-        topObj.transform.localPosition = new Vector3(0, 0.3f, 0);
-        topObj.transform.localScale = new Vector3(0.15f, 0.05f, 0.15f);
-        SetColor(topObj, new Color(0.1f, 0.1f, 0.1f));
-        
+        glassObj.transform.localPosition = new Vector3(0, 0.16f, 0);
+        glassObj.transform.localScale = new Vector3(0.14f, 0.12f, 0.14f);
+        SetColor(glassObj, new Color(0.95f, 0.95f, 0.9f, 0.45f));
+
+        // 4 Barras de gaiola de proteção vertical
+        for (int i = 0; i < 4; i++)
+        {
+            float angle = i * 90f * Mathf.Deg2Rad;
+            GameObject bar = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            bar.name = "CageBar_" + i;
+            bar.transform.SetParent(lanternObj.transform);
+            bar.transform.localPosition = new Vector3(Mathf.Cos(angle) * 0.08f, 0.16f, Mathf.Sin(angle) * 0.08f);
+            bar.transform.localScale = new Vector3(0.012f, 0.12f, 0.012f);
+            SetColor(bar, new Color(0.25f, 0.25f, 0.27f));
+        }
+
+        // Cúpula superior de exaustão
+        GameObject hood = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        hood.name = "Vented_Hood";
+        hood.transform.SetParent(lanternObj.transform);
+        hood.transform.localPosition = new Vector3(0, 0.31f, 0);
+        hood.transform.localScale = new Vector3(0.17f, 0.04f, 0.17f);
+        SetColor(hood, new Color(0.22f, 0.22f, 0.24f));
+
+        // Anel de transporte superior
+        GameObject ring = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        ring.name = "Handle_Ring";
+        ring.transform.SetParent(lanternObj.transform);
+        ring.transform.localPosition = new Vector3(0, 0.38f, 0);
+        ring.transform.localScale = new Vector3(0.08f, 0.01f, 0.08f);
+        ring.transform.localRotation = Quaternion.Euler(90, 0, 0);
+        SetColor(ring, new Color(0.55f, 0.45f, 0.2f));
+
+        // Pavio e Luz Quente de Querosene
+        GameObject flame = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        flame.name = "Flame_Wick";
+        flame.transform.SetParent(lanternObj.transform);
+        flame.transform.localPosition = new Vector3(0, 0.14f, 0);
+        flame.transform.localScale = new Vector3(0.035f, 0.05f, 0.035f);
+        SetColor(flame, new Color(1f, 0.85f, 0.4f), "Mat_Emissive_Campfire");
+
         Light l = lanternObj.AddComponent<Light>();
         l.type = LightType.Point;
-        l.color = new Color(1f, 0.8f, 0.4f);
-        l.range = 15f;
-        l.intensity = 3f;
+        l.color = new Color(1f, 0.82f, 0.45f);
+        l.range = 16f;
+        l.intensity = 3.2f;
+        l.shadows = LightShadows.Soft;
 
         PrefabUtility.SaveAsPrefabAsset(lanternObj, dir + "/Lantern_Prefab.prefab");
         DestroyImmediate(lanternObj);
@@ -603,16 +932,32 @@ public class FragaAssetGenerator : MonoBehaviour
     private static void GeneratePondPrefab(string dir)
     {
         GameObject pondObj = new GameObject("Pond_Prefab");
-        
+
+        // Margem de pedras e rochas graníticas com musgo
+        for (int s = 0; s < 8; s++)
+        {
+            float angle = s * 45f * Mathf.Deg2Rad;
+            GameObject stone = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            stone.name = "Shore_Stone_" + s;
+            stone.transform.SetParent(pondObj.transform);
+            stone.transform.localPosition = new Vector3(Mathf.Cos(angle) * 1.85f, 0.08f, Mathf.Sin(angle) * 1.85f);
+            stone.transform.localScale = new Vector3(Random.Range(0.4f, 0.7f), Random.Range(0.2f, 0.35f), Random.Range(0.4f, 0.7f));
+            stone.transform.localRotation = Quaternion.Euler(Random.Range(-20, 20), Random.Range(0, 360), Random.Range(-20, 20));
+            SetColor(stone, new Color(0.38f, 0.38f, 0.4f), "Celtic_Stone", "celtic_stone");
+        }
+
+        // Superfície da água translúcida e móvel (GalicianWater_Lit)
         GameObject water = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        water.name = "Water_Surface";
         water.transform.SetParent(pondObj.transform);
         water.transform.localPosition = new Vector3(0, 0.02f, 0);
-        water.transform.localScale = new Vector3(2f, 0.01f, 2f);
-        SetColor(water, new Color(0.1f, 0.3f, 0.8f, 0.8f)); // Agua transparente
-        
-        // Animate water
+        water.transform.localScale = new Vector3(3.6f, 0.01f, 3.6f);
+        SetColor(water, new Color(0.08f, 0.22f, 0.28f, 0.8f), "Water_Surface");
+
         water.AddComponent<AnimatedWater>();
-        
+
+        ApplyOrganicNoiseToMesh(pondObj, 0.15f, 2.0f);
+
         PrefabUtility.SaveAsPrefabAsset(pondObj, dir + "/Pond_Prefab.prefab");
         DestroyImmediate(pondObj);
     }
@@ -686,6 +1031,16 @@ public class FragaAssetGenerator : MonoBehaviour
         ear2.transform.localScale = new Vector3(0.05f, 0.15f, 0.05f);
         SetColor(ear2, new Color(0.8f, 0.8f, 0.8f));
         
+        CapsuleCollider col = rabbitObj.AddComponent<CapsuleCollider>();
+        col.radius = 0.18f;
+        col.height = 0.45f;
+        col.center = new Vector3(0, 0.2f, 0);
+
+        var anim = rabbitObj.AddComponent<AnimalProceduralAnimator>();
+        anim.locomotionStyle = AnimalProceduralAnimator.LocomotionStyle.Hopper;
+        anim.strideSpeedMultiplier = 5.0f;
+        anim.bodyBobAmount = 0.15f;
+
         PrefabUtility.SaveAsPrefabAsset(rabbitObj, dir + "/Rabbit_Prefab.prefab");
         DestroyImmediate(rabbitObj);
     }
@@ -729,24 +1084,33 @@ public class FragaAssetGenerator : MonoBehaviour
         private static void GenerateRunicStonePrefab(string dir)
     {
         GameObject obj = new GameObject("RunicStone_Prefab");
-        
-        // Base monolith (Jagged using multiple intersected cubes)
-        for(int i = 0; i < 3; i++) {
+
+        // Monólito de granito antigo entalhado com 3 blocos irregulares
+        for (int i = 0; i < 3; i++)
+        {
             GameObject stone = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            stone.name = "Runic_Slab_" + i;
             stone.transform.SetParent(obj.transform);
-            stone.transform.localPosition = new Vector3(Random.Range(-0.1f, 0.1f), 0.8f + Random.Range(-0.2f, 0.2f), Random.Range(-0.1f, 0.1f));
-            stone.transform.localScale = new Vector3(0.5f + Random.Range(-0.1f, 0.2f), 1.6f, 0.3f + Random.Range(-0.1f, 0.1f));
-            stone.transform.localRotation = Quaternion.Euler(Random.Range(-5, 5), Random.Range(0, 360), Random.Range(-5, 5));
-            SetColor(stone, new Color(0.35f, 0.35f, 0.38f), "Celtic_Stone", "celtic_stone");
+            stone.transform.localPosition = new Vector3(Random.Range(-0.08f, 0.08f), 0.9f + (i * 0.1f), Random.Range(-0.08f, 0.08f));
+            stone.transform.localScale = new Vector3(0.55f + Random.Range(-0.08f, 0.12f), 1.8f - (i * 0.2f), 0.38f + Random.Range(-0.06f, 0.08f));
+            stone.transform.localRotation = Quaternion.Euler(Random.Range(-6, 6), Random.Range(0, 360), Random.Range(-6, 6));
+            SetColor(stone, new Color(0.38f, 0.38f, 0.41f), "Celtic_Stone", "celtic_stone");
         }
-        
-        // Rune glow strip
+
+        // Glifo rúnico luminoso entalhado em baixo-relevo
         GameObject rune = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        rune.name = "Rune_Glyph";
         rune.transform.SetParent(obj.transform);
-        rune.transform.localPosition = new Vector3(0, 0.8f, 0.2f);
-        rune.transform.localScale = new Vector3(0.05f, 0.8f, 0.05f);
-        SetColor(rune, new Color(0.1f, 0.8f, 0.6f)); // Emissive teal
-        
+        rune.transform.localPosition = new Vector3(0, 0.95f, 0.21f);
+        rune.transform.localScale = new Vector3(0.06f, 0.95f, 0.04f);
+        SetColor(rune, new Color(0.1f, 0.95f, 0.75f), "Mat_Emissive_RuneGlow");
+
+        ApplyOrganicNoiseToMesh(obj, 0.2f, 2.0f);
+
+        BoxCollider coll = obj.AddComponent<BoxCollider>();
+        coll.size = new Vector3(0.85f, 2.0f, 0.65f);
+        coll.center = new Vector3(0, 1.0f, 0);
+
         PrefabUtility.SaveAsPrefabAsset(obj, dir + "/RunicStone_Prefab.prefab");
         DestroyImmediate(obj);
     }
@@ -754,21 +1118,54 @@ public class FragaAssetGenerator : MonoBehaviour
     private static void GenerateFallenLogPrefab(string dir)
     {
         GameObject obj = new GameObject("FallenLog_Prefab");
-        
+
+        // Tronco caído oco e envelhecido
         GameObject log = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        log.name = "Fallen_Trunk";
         log.transform.SetParent(obj.transform);
-        log.transform.localPosition = new Vector3(0, 0.15f, 0);
-        log.transform.localScale = new Vector3(0.3f, 1.2f, 0.3f);
-        log.transform.localRotation = Quaternion.Euler(0, 0, 90);
-        SetColor(log, new Color(0.25f, 0.15f, 0.08f));
-        
-        // Moss patches
-        GameObject moss = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        moss.transform.SetParent(obj.transform);
-        moss.transform.localPosition = new Vector3(0.3f, 0.25f, 0);
-        moss.transform.localScale = new Vector3(0.3f, 0.1f, 0.2f);
-        SetColor(moss, new Color(0.15f, 0.4f, 0.1f));
-        
+        log.transform.localPosition = new Vector3(0, 0.22f, 0);
+        log.transform.localScale = new Vector3(0.38f, 1.4f, 0.38f);
+        log.transform.localRotation = Quaternion.Euler(0, 0, 90f);
+        SetColor(log, new Color(0.26f, 0.18f, 0.1f), "Wood_Bark");
+
+        // Tocos de galhos partidos
+        for (int i = 0; i < 2; i++)
+        {
+            GameObject stub = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            stub.name = "Branch_Stub_" + i;
+            stub.transform.SetParent(obj.transform);
+            stub.transform.localPosition = new Vector3(-0.4f + (i * 0.9f), 0.38f, 0.15f * (i == 0 ? 1 : -1));
+            stub.transform.localScale = new Vector3(0.08f, 0.2f, 0.08f);
+            stub.transform.localRotation = Quaternion.Euler(45f * (i == 0 ? 1 : -1), 0, 0);
+            SetColor(stub, new Color(0.24f, 0.16f, 0.08f), "Wood_Bark");
+        }
+
+        // Cogumelos em prateleira (Polypores / Fungos de árvore da Galícia)
+        for (int m = 0; m < 3; m++)
+        {
+            GameObject shelfFungus = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            shelfFungus.name = "Shelf_Fungus_" + m;
+            shelfFungus.transform.SetParent(obj.transform);
+            shelfFungus.transform.localPosition = new Vector3(-0.5f + (m * 0.45f), 0.28f + (m * 0.04f), 0.34f);
+            shelfFungus.transform.localScale = new Vector3(0.18f, 0.02f, 0.12f);
+            shelfFungus.transform.localRotation = Quaternion.Euler(15f, 0, 0);
+            SetColor(shelfFungus, new Color(0.6f, 0.52f, 0.4f));
+        }
+
+        // Manto de musgo espesso na crista do tronco
+        GameObject mossRidge = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        mossRidge.name = "Moss_Ridge";
+        mossRidge.transform.SetParent(obj.transform);
+        mossRidge.transform.localPosition = new Vector3(0.1f, 0.38f, 0);
+        mossRidge.transform.localScale = new Vector3(1.2f, 0.14f, 0.32f);
+        SetColor(mossRidge, new Color(0.12f, 0.34f, 0.08f), "Mat_DarkForest_Moss");
+
+        ApplyOrganicNoiseToMesh(obj, 0.16f, 2.0f);
+
+        BoxCollider coll = obj.AddComponent<BoxCollider>();
+        coll.size = new Vector3(2.8f, 0.6f, 0.8f);
+        coll.center = new Vector3(0, 0.25f, 0);
+
         PrefabUtility.SaveAsPrefabAsset(obj, dir + "/FallenLog_Prefab.prefab");
         DestroyImmediate(obj);
     }
@@ -799,18 +1196,46 @@ public class FragaAssetGenerator : MonoBehaviour
     private static void GenerateThornyBushPrefab(string dir)
     {
         GameObject obj = new GameObject("ThornyBush_Prefab");
-        
-        // Realistic Foliage Quads
-        for (int i = 0; i < 3; i++)
+
+        // Galhos espinhosos cruzados na base
+        for (int s = 0; s < 4; s++)
         {
-            GameObject quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
-            quad.transform.SetParent(obj.transform);
-            quad.transform.localPosition = new Vector3(0, 0.5f, 0);
-            quad.transform.localScale = new Vector3(1.5f, 1.5f, 1.5f);
-            quad.transform.localRotation = Quaternion.Euler(0, i * 60f, 0);
-            SetColor(quad, new Color(0.15f, 0.25f, 0.1f), "Bush_Leaves", "foliage_dark");
+            GameObject stem = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            stem.name = "Spine_Stem_" + s;
+            stem.transform.SetParent(obj.transform);
+            float angle = s * 90f + 20f;
+            stem.transform.localPosition = new Vector3(Mathf.Cos(angle * Mathf.Deg2Rad) * 0.15f, 0.35f, Mathf.Sin(angle * Mathf.Deg2Rad) * 0.15f);
+            stem.transform.localScale = new Vector3(0.04f, 0.45f, 0.04f);
+            stem.transform.localRotation = Quaternion.Euler(Random.Range(-25, 25), angle, Random.Range(-25, 25));
+            SetColor(stem, new Color(0.2f, 0.16f, 0.1f), "Mat_DarkForest_Bark");
         }
-        
+
+        // Folhagem densa volumétrica com shader de folha The Forest
+        for (int i = 0; i < 4; i++)
+        {
+            GameObject cluster = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            cluster.name = "Bush_Cluster_" + i;
+            cluster.transform.SetParent(obj.transform);
+            cluster.transform.localPosition = new Vector3(Random.Range(-0.25f, 0.25f), 0.45f + (i * 0.1f), Random.Range(-0.25f, 0.25f));
+            float scale = Random.Range(0.85f, 1.25f);
+            cluster.transform.localScale = new Vector3(scale, scale * 0.7f, scale);
+            SetColor(cluster, new Color(0.13f, 0.32f, 0.1f), "Bush_Leaves", "foliage_dark");
+        }
+
+        // Pequenas flores amarelas características do tojo galego
+        for (int fl = 0; fl < 5; fl++)
+        {
+            GameObject bloom = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            bloom.name = "Toxo_Bloom_" + fl;
+            bloom.transform.SetParent(obj.transform);
+            float bAngle = fl * 72f * Mathf.Deg2Rad;
+            bloom.transform.localPosition = new Vector3(Mathf.Cos(bAngle) * 0.35f, 0.55f + Random.Range(-0.1f, 0.15f), Mathf.Sin(bAngle) * 0.35f);
+            bloom.transform.localScale = new Vector3(0.07f, 0.07f, 0.07f);
+            SetColor(bloom, new Color(1f, 0.88f, 0.15f));
+        }
+
+        ApplyOrganicNoiseToMesh(obj, 0.14f, 2.8f);
+
         PrefabUtility.SaveAsPrefabAsset(obj, dir + "/ThornyBush_Prefab.prefab");
         DestroyImmediate(obj);
     }
@@ -847,28 +1272,53 @@ public class FragaAssetGenerator : MonoBehaviour
     private static void GenerateCelticCrossPrefab(string dir)
     {
         GameObject obj = new GameObject("CelticCross_Prefab");
-        
-        // Vertical beam
+
+        // Base escalonada de 2 degraus
+        GameObject base1 = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        base1.name = "Plinth_Step1";
+        base1.transform.SetParent(obj.transform);
+        base1.transform.localPosition = new Vector3(0, 0.15f, 0);
+        base1.transform.localScale = new Vector3(0.9f, 0.3f, 0.9f);
+        SetColor(base1, new Color(0.42f, 0.42f, 0.45f), "Celtic_Stone", "celtic_stone");
+
+        GameObject base2 = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        base2.name = "Plinth_Step2";
+        base2.transform.SetParent(obj.transform);
+        base2.transform.localPosition = new Vector3(0, 0.38f, 0);
+        base2.transform.localScale = new Vector3(0.65f, 0.2f, 0.65f);
+        SetColor(base2, new Color(0.42f, 0.42f, 0.45f), "Celtic_Stone", "celtic_stone");
+
+        // Haste vertical de granito
         GameObject vert = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        vert.name = "Cross_Vertical";
         vert.transform.SetParent(obj.transform);
-        vert.transform.localPosition = new Vector3(0, 1f, 0);
-        vert.transform.localScale = new Vector3(0.15f, 2f, 0.1f);
-        SetColor(vert, new Color(0.45f, 0.45f, 0.48f));
-        
-        // Horizontal beam
+        vert.transform.localPosition = new Vector3(0, 1.45f, 0);
+        vert.transform.localScale = new Vector3(0.18f, 2.0f, 0.14f);
+        SetColor(vert, new Color(0.44f, 0.44f, 0.47f), "Celtic_Stone", "celtic_stone");
+
+        // Braço horizontal
         GameObject horiz = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        horiz.name = "Cross_Horizontal";
         horiz.transform.SetParent(obj.transform);
-        horiz.transform.localPosition = new Vector3(0, 1.3f, 0);
-        horiz.transform.localScale = new Vector3(0.8f, 0.15f, 0.1f);
-        SetColor(horiz, new Color(0.45f, 0.45f, 0.48f));
-        
-        // Circle (nimbus)
+        horiz.transform.localPosition = new Vector3(0, 1.8f, 0);
+        horiz.transform.localScale = new Vector3(0.95f, 0.18f, 0.14f);
+        SetColor(horiz, new Color(0.44f, 0.44f, 0.47f), "Celtic_Stone", "celtic_stone");
+
+        // Nimbus / Aro Céltico Solar
         GameObject nimbus = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        nimbus.name = "Nimbus_Ring";
         nimbus.transform.SetParent(obj.transform);
-        nimbus.transform.localPosition = new Vector3(0, 1.3f, 0);
-        nimbus.transform.localScale = new Vector3(0.4f, 0.4f, 0.05f);
-        SetColor(nimbus, new Color(0.5f, 0.5f, 0.52f));
-        
+        nimbus.transform.localPosition = new Vector3(0, 1.8f, 0);
+        nimbus.transform.localScale = new Vector3(0.55f, 0.06f, 0.55f);
+        nimbus.transform.localRotation = Quaternion.Euler(90f, 0, 0);
+        SetColor(nimbus, new Color(0.46f, 0.46f, 0.49f), "Celtic_Stone", "celtic_stone");
+
+        ApplyOrganicNoiseToMesh(obj, 0.12f, 2.5f);
+
+        BoxCollider coll = obj.AddComponent<BoxCollider>();
+        coll.size = new Vector3(0.95f, 2.5f, 0.95f);
+        coll.center = new Vector3(0, 1.25f, 0);
+
         PrefabUtility.SaveAsPrefabAsset(obj, dir + "/CelticCross_Prefab.prefab");
         DestroyImmediate(obj);
     }
@@ -876,22 +1326,39 @@ public class FragaAssetGenerator : MonoBehaviour
     private static void GenerateAncientGravePrefab(string dir)
     {
         GameObject obj = new GameObject("AncientGrave_Prefab");
-        
-        // Tombstone
+
+        // Lápide de pedra de xisto/granito fincada inclinada
         GameObject stone = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        stone.name = "Headstone";
         stone.transform.SetParent(obj.transform);
-        stone.transform.localPosition = new Vector3(0, 0.4f, 0);
-        stone.transform.localScale = new Vector3(0.4f, 0.8f, 0.1f);
-        stone.transform.localRotation = Quaternion.Euler(5, 0, -3);
-        SetColor(stone, new Color(0.3f, 0.3f, 0.32f));
-        
-        // Dirt mound
+        stone.transform.localPosition = new Vector3(0, 0.48f, -0.35f);
+        stone.transform.localScale = new Vector3(0.46f, 0.9f, 0.14f);
+        stone.transform.localRotation = Quaternion.Euler(7f, 0, -4f);
+        SetColor(stone, new Color(0.38f, 0.38f, 0.41f), "Celtic_Stone", "celtic_stone");
+
+        // Montículo de terra de turfa escuro e pedras de contorno
         GameObject mound = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        mound.name = "Burial_Mound";
         mound.transform.SetParent(obj.transform);
-        mound.transform.localPosition = new Vector3(0, 0.08f, 0.3f);
-        mound.transform.localScale = new Vector3(0.6f, 0.15f, 0.8f);
-        SetColor(mound, new Color(0.2f, 0.15f, 0.08f));
-        
+        mound.transform.localPosition = new Vector3(0, 0.1f, 0.25f);
+        mound.transform.localScale = new Vector3(0.7f, 0.22f, 1.15f);
+        SetColor(mound, new Color(0.18f, 0.13f, 0.08f), "Mat_DarkForest_Ground");
+
+        // Pedras menores de orla
+        for (int p = 0; p < 4; p++)
+        {
+            GameObject borderStone = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            borderStone.name = "BorderStone_" + p;
+            borderStone.transform.SetParent(obj.transform);
+            float z = -0.1f + (p * 0.25f);
+            float x = (p % 2 == 0) ? 0.35f : -0.35f;
+            borderStone.transform.localPosition = new Vector3(x, 0.08f, z);
+            borderStone.transform.localScale = new Vector3(0.18f, 0.12f, 0.18f);
+            SetColor(borderStone, new Color(0.36f, 0.36f, 0.38f), "Celtic_Stone", "celtic_stone");
+        }
+
+        ApplyOrganicNoiseToMesh(obj, 0.12f, 3.0f);
+
         PrefabUtility.SaveAsPrefabAsset(obj, dir + "/AncientGrave_Prefab.prefab");
         DestroyImmediate(obj);
     }
@@ -953,6 +1420,27 @@ public class FragaAssetGenerator : MonoBehaviour
         tail.transform.localRotation = Quaternion.Euler(45, 0, 0);
         SetColor(tail, new Color(0.15f, 0.15f, 0.18f), "Wolf_Fur", "wolf_fur");
         
+        // Olhos Noturnos Luminescentes
+        for (int i = -1; i <= 1; i += 2) {
+            GameObject eye = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            eye.name = "Eye_" + (i == 1 ? "R" : "L");
+            eye.transform.SetParent(wolfObj.transform);
+            eye.transform.localPosition = new Vector3(i * 0.11f, 0.98f, 0.74f);
+            eye.transform.localScale = new Vector3(0.06f, 0.06f, 0.06f);
+            SetColor(eye, new Color(1.0f, 0.85f, 0.2f), "Animal_GlowingEyes");
+        }
+
+        CapsuleCollider wCol = wolfObj.AddComponent<CapsuleCollider>();
+        wCol.radius = 0.35f;
+        wCol.height = 1.3f;
+        wCol.center = new Vector3(0, 0.65f, 0);
+
+        var wAnim = wolfObj.AddComponent<AnimalProceduralAnimator>();
+        wAnim.locomotionStyle = AnimalProceduralAnimator.LocomotionStyle.QuadrupedStalker;
+        wAnim.strideSpeedMultiplier = 3.8f;
+        wAnim.legSwingAngle = 28f;
+        wAnim.bodyBobAmount = 0.05f;
+
         PrefabUtility.SaveAsPrefabAsset(wolfObj, dir + "/Wolf_Prefab.prefab");
         DestroyImmediate(wolfObj);
     }
@@ -1015,8 +1503,263 @@ public class FragaAssetGenerator : MonoBehaviour
             }
         }
         
+        CapsuleCollider dCol = deerObj.AddComponent<CapsuleCollider>();
+        dCol.radius = 0.40f;
+        dCol.height = 1.7f;
+        dCol.center = new Vector3(0, 1.0f, 0);
+
+        var dAnim = deerObj.AddComponent<AnimalProceduralAnimator>();
+        dAnim.locomotionStyle = AnimalProceduralAnimator.LocomotionStyle.QuadrupedUngulate;
+        dAnim.strideSpeedMultiplier = 3.2f;
+        dAnim.legSwingAngle = 24f;
+        dAnim.bodyBobAmount = 0.06f;
+
         PrefabUtility.SaveAsPrefabAsset(deerObj, dir + "/Deer_Prefab.prefab");
         DestroyImmediate(deerObj);
+    }
+
+
+    private static void GenerateBearPrefab(string dir)
+    {
+        GameObject bearObj = new GameObject("Bear_Prefab");
+
+        // Corpo Macico e Pesado
+        GameObject body = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+        body.name = "Body_Torso";
+        body.transform.SetParent(bearObj.transform);
+        body.transform.localPosition = new Vector3(0, 0.95f, 0);
+        body.transform.localScale = new Vector3(0.85f, 0.9f, 1.45f);
+        body.transform.localRotation = Quaternion.Euler(85, 0, 0);
+        SetColor(body, new Color(0.20f, 0.14f, 0.10f), "Bear_Fur", "wolf_fur");
+
+        // Cupim / Ombros Poderosos
+        GameObject hump = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        hump.name = "Shoulder_Hump";
+        hump.transform.SetParent(bearObj.transform);
+        hump.transform.localPosition = new Vector3(0, 1.25f, 0.35f);
+        hump.transform.localScale = new Vector3(0.8f, 0.65f, 0.75f);
+        SetColor(hump, new Color(0.18f, 0.12f, 0.08f), "Bear_Fur", "wolf_fur");
+
+        // Cabeca Larga
+        GameObject head = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        head.name = "Head";
+        head.transform.SetParent(bearObj.transform);
+        head.transform.localPosition = new Vector3(0, 1.15f, 0.85f);
+        head.transform.localScale = new Vector3(0.55f, 0.5f, 0.55f);
+        SetColor(head, new Color(0.22f, 0.15f, 0.11f), "Bear_Fur", "wolf_fur");
+
+        // Focinho Grosso
+        GameObject snout = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+        snout.name = "Snout";
+        snout.transform.SetParent(bearObj.transform);
+        snout.transform.localPosition = new Vector3(0, 1.0f, 1.15f);
+        snout.transform.localScale = new Vector3(0.32f, 0.32f, 0.42f);
+        snout.transform.localRotation = Quaternion.Euler(90, 0, 0);
+        SetColor(snout, new Color(0.14f, 0.10f, 0.08f));
+
+        // Orelhas Arredondadas
+        for (int i = -1; i <= 1; i += 2)
+        {
+            GameObject ear = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            ear.name = "Ear_" + (i == 1 ? "R" : "L");
+            ear.transform.SetParent(bearObj.transform);
+            ear.transform.localPosition = new Vector3(i * 0.28f, 1.45f, 0.75f);
+            ear.transform.localScale = new Vector3(0.16f, 0.16f, 0.10f);
+            SetColor(ear, new Color(0.15f, 0.10f, 0.08f));
+        }
+
+        // Patas Robustas
+        for (int i = -1; i <= 1; i += 2)
+        {
+            for (int j = -1; j <= 1; j += 2)
+            {
+                GameObject leg = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                string side = (j == 1 ? "F" : "B") + (i == 1 ? "R" : "L");
+                leg.name = "Leg_" + side;
+                leg.transform.SetParent(bearObj.transform);
+                float z = j == 1 ? 0.45f : -0.45f;
+                leg.transform.localPosition = new Vector3(i * 0.32f, 0.42f, z);
+                leg.transform.localScale = new Vector3(0.22f, 0.42f, 0.22f);
+                SetColor(leg, new Color(0.16f, 0.11f, 0.08f), "Bear_Fur", "wolf_fur");
+            }
+        }
+
+        // Cauda Curta
+        GameObject tail = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        tail.name = "Tail";
+        tail.transform.SetParent(bearObj.transform);
+        tail.transform.localPosition = new Vector3(0, 0.95f, -0.8f);
+        tail.transform.localScale = new Vector3(0.18f, 0.18f, 0.18f);
+        SetColor(tail, new Color(0.15f, 0.10f, 0.08f));
+
+        // Colisor e Animador Procedural
+        CapsuleCollider col = bearObj.AddComponent<CapsuleCollider>();
+        col.radius = 0.65f;
+        col.height = 1.9f;
+        col.center = new Vector3(0, 0.85f, 0);
+
+        var anim = bearObj.AddComponent<AnimalProceduralAnimator>();
+        anim.locomotionStyle = AnimalProceduralAnimator.LocomotionStyle.QuadrupedHeavy;
+        anim.strideSpeedMultiplier = 2.4f;
+        anim.legSwingAngle = 20f;
+        anim.bodyBobAmount = 0.06f;
+
+        PrefabUtility.SaveAsPrefabAsset(bearObj, dir + "/Bear_Prefab.prefab");
+        DestroyImmediate(bearObj);
+    }
+
+    private static void GenerateBoarPrefab(string dir)
+    {
+        GameObject boarObj = new GameObject("Boar_Prefab");
+
+        // Corpo Musculoso e Compacto
+        GameObject body = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+        body.name = "Body_Torso";
+        body.transform.SetParent(boarObj.transform);
+        body.transform.localPosition = new Vector3(0, 0.55f, 0);
+        body.transform.localScale = new Vector3(0.55f, 0.62f, 1.15f);
+        body.transform.localRotation = Quaternion.Euler(85, 0, 0);
+        SetColor(body, new Color(0.25f, 0.18f, 0.14f), "Boar_Bristles", "wolf_fur");
+
+        // Cerdas / Crista Dorsal
+        for (int s = 0; s < 4; s++)
+        {
+            GameObject bristle = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            bristle.name = "Bristle_" + s;
+            bristle.transform.SetParent(boarObj.transform);
+            bristle.transform.localPosition = new Vector3(0, 0.92f - s * 0.06f, 0.35f - s * 0.22f);
+            bristle.transform.localScale = new Vector3(0.08f, 0.18f, 0.18f);
+            bristle.transform.localRotation = Quaternion.Euler(-15f, 0f, 0f);
+            SetColor(bristle, new Color(0.16f, 0.12f, 0.10f));
+        }
+
+        // Cabeca Conica com Focinho Achatado
+        GameObject head = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        head.name = "Head";
+        head.transform.SetParent(boarObj.transform);
+        head.transform.localPosition = new Vector3(0, 0.65f, 0.65f);
+        head.transform.localScale = new Vector3(0.42f, 0.45f, 0.52f);
+        SetColor(head, new Color(0.22f, 0.16f, 0.12f), "Boar_Bristles", "wolf_fur");
+
+        GameObject snout = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        snout.name = "Snout";
+        snout.transform.SetParent(boarObj.transform);
+        snout.transform.localPosition = new Vector3(0, 0.52f, 0.92f);
+        snout.transform.localScale = new Vector3(0.24f, 0.14f, 0.24f);
+        snout.transform.localRotation = Quaternion.Euler(90, 0, 0);
+        SetColor(snout, new Color(0.14f, 0.10f, 0.08f));
+
+        // Presas Brancas Afiadas (Tusks)
+        for (int i = -1; i <= 1; i += 2)
+        {
+            GameObject tusk = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            tusk.name = "Tusk_" + (i == 1 ? "R" : "L");
+            tusk.transform.SetParent(boarObj.transform);
+            tusk.transform.localPosition = new Vector3(i * 0.15f, 0.56f, 0.90f);
+            tusk.transform.localScale = new Vector3(0.06f, 0.16f, 0.06f);
+            tusk.transform.localRotation = Quaternion.Euler(-40f, 0f, i * -25f);
+            SetColor(tusk, new Color(0.92f, 0.90f, 0.82f));
+        }
+
+        // Orelhas Pontiagudas
+        for (int i = -1; i <= 1; i += 2)
+        {
+            GameObject ear = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            ear.name = "Ear_" + (i == 1 ? "R" : "L");
+            ear.transform.SetParent(boarObj.transform);
+            ear.transform.localPosition = new Vector3(i * 0.20f, 0.88f, 0.58f);
+            ear.transform.localScale = new Vector3(0.10f, 0.20f, 0.08f);
+            ear.transform.localRotation = Quaternion.Euler(20f, 0f, i * -30f);
+            SetColor(ear, new Color(0.18f, 0.13f, 0.10f));
+        }
+
+        // Patas
+        for (int i = -1; i <= 1; i += 2)
+        {
+            for (int j = -1; j <= 1; j += 2)
+            {
+                GameObject leg = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                string side = (j == 1 ? "F" : "B") + (i == 1 ? "R" : "L");
+                leg.name = "Leg_" + side;
+                leg.transform.SetParent(boarObj.transform);
+                float z = j == 1 ? 0.35f : -0.35f;
+                leg.transform.localPosition = new Vector3(i * 0.18f, 0.24f, z);
+                leg.transform.localScale = new Vector3(0.14f, 0.24f, 0.14f);
+                SetColor(leg, new Color(0.15f, 0.11f, 0.08f));
+            }
+        }
+
+        // Colisor e Animador Procedural
+        CapsuleCollider col = boarObj.AddComponent<CapsuleCollider>();
+        col.radius = 0.45f;
+        col.height = 1.4f;
+        col.center = new Vector3(0, 0.5f, 0);
+
+        var anim = boarObj.AddComponent<AnimalProceduralAnimator>();
+        anim.locomotionStyle = AnimalProceduralAnimator.LocomotionStyle.QuadrupedUngulate;
+        anim.strideSpeedMultiplier = 3.6f;
+        anim.legSwingAngle = 24f;
+        anim.bodyBobAmount = 0.04f;
+
+        PrefabUtility.SaveAsPrefabAsset(boarObj, dir + "/Boar_Prefab.prefab");
+        DestroyImmediate(boarObj);
+    }
+
+    private static void GenerateRuinPrefab(string dir)
+    {
+        GameObject ruinObj = new GameObject("Ruin_Prefab");
+
+        // 1. Pilares Megaliticos Verticais (Anta / Dolmen Celta da Galicia)
+        Vector3[] pillarOffsets = new Vector3[] {
+            new Vector3(-1.6f, 1.8f, -1.4f),
+            new Vector3(1.6f, 1.75f, -1.3f),
+            new Vector3(-1.5f, 1.85f, 1.4f),
+            new Vector3(1.7f, 1.8f, 1.35f)
+        };
+
+        for (int i = 0; i < pillarOffsets.Length; i++)
+        {
+            GameObject pillar = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            pillar.name = "Megalith_Pillar_" + i;
+            pillar.transform.SetParent(ruinObj.transform);
+            pillar.transform.localPosition = pillarOffsets[i];
+            pillar.transform.localScale = new Vector3(0.95f, 3.6f, 0.95f);
+            pillar.transform.localRotation = Quaternion.Euler(Random.Range(-4f, 4f), Random.Range(0f, 360f), Random.Range(-4f, 4f));
+            SetColor(pillar, new Color(0.55f, 0.55f, 0.58f), "Celtic_Stone", "celtic_stone");
+        }
+
+        // 2. Colossal Laje Superior Horizontal (Capstone / Tampa do Dolmen)
+        GameObject capstone = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        capstone.name = "Megalith_Capstone";
+        capstone.transform.SetParent(ruinObj.transform);
+        capstone.transform.localPosition = new Vector3(0.05f, 3.75f, 0.02f);
+        capstone.transform.localScale = new Vector3(4.2f, 0.75f, 4.4f);
+        capstone.transform.localRotation = Quaternion.Euler(-2.5f, 18f, 1.5f);
+        SetColor(capstone, new Color(0.52f, 0.52f, 0.55f), "Celtic_Stone", "celtic_stone");
+
+        // 3. Pedra de Altar / Lareira Ritual Central
+        GameObject hearth = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        hearth.name = "Ritual_Hearth";
+        hearth.transform.SetParent(ruinObj.transform);
+        hearth.transform.localPosition = new Vector3(0, 0.2f, 0);
+        hearth.transform.localScale = new Vector3(1.8f, 0.35f, 1.8f);
+        SetColor(hearth, new Color(0.38f, 0.36f, 0.34f), "Mat_Ruins_Stone", "celtic_stone");
+
+        // 4. Monolitos e Penedos Caidos nos Arredores
+        for (int r = 0; r < 3; r++)
+        {
+            GameObject fallen = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            fallen.name = "Fallen_Slab_" + r;
+            fallen.transform.SetParent(ruinObj.transform);
+            float ang = r * 2.1f;
+            fallen.transform.localPosition = new Vector3(Mathf.Cos(ang) * 3.2f, 0.4f, Mathf.Sin(ang) * 3.2f);
+            fallen.transform.localScale = new Vector3(1.1f, 0.6f, 1.8f);
+            fallen.transform.localRotation = Quaternion.Euler(Random.Range(10f, 35f), Random.Range(0f, 360f), Random.Range(-20f, 20f));
+            SetColor(fallen, new Color(0.50f, 0.50f, 0.52f), "Celtic_Stone", "celtic_stone");
+        }
+
+        PrefabUtility.SaveAsPrefabAsset(ruinObj, dir + "/Ruin_Prefab.prefab");
+        DestroyImmediate(ruinObj);
     }
 
     private static void GenerateBossPrefab(string dir)
@@ -1111,23 +1854,80 @@ public class FragaAssetGenerator : MonoBehaviour
         DestroyImmediate(altarObj);
     }
 
+
+    private static void GenerateFentoPrefab(string dir)
+    {
+        GameObject obj = new GameObject("Fento_Prefab");
+
+        // Rizoma / Coroa central
+        GameObject rhizome = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        rhizome.name = "Rhizome_Crown";
+        rhizome.transform.SetParent(obj.transform);
+        rhizome.transform.localPosition = new Vector3(0, 0.08f, 0);
+        rhizome.transform.localScale = new Vector3(0.22f, 0.12f, 0.22f);
+        SetColor(rhizome, new Color(0.2f, 0.14f, 0.08f), "Mat_DarkForest_Bark");
+
+        // 8 Frondes arqueadas em leque radial (Fentos das Fragas do Eume)
+        int frondCount = 8;
+        for (int f = 0; f < frondCount; f++)
+        {
+            float angle = f * (360f / frondCount) + Random.Range(-8f, 8f);
+            Quaternion frondYaw = Quaternion.Euler(0, angle, 0);
+
+            // Raque (eixo central da fronde)
+            GameObject stipe = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            stipe.name = "Stipe_" + f;
+            stipe.transform.SetParent(obj.transform);
+            Quaternion stipePitch = frondYaw * Quaternion.Euler(38f, 0, 0);
+            stipe.transform.localRotation = stipePitch;
+            Vector3 stipeDir = stipePitch * Vector3.up;
+            stipe.transform.localPosition = new Vector3(0, 0.08f, 0) + stipeDir * 0.35f;
+            stipe.transform.localScale = new Vector3(0.02f, 0.4f, 0.02f);
+            SetColor(stipe, new Color(0.18f, 0.35f, 0.12f), "Mat_DarkForest_Bark");
+
+            // Lâmina foliar da fronde (leque translúcido com shader de folhagem)
+            GameObject leafBlade = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            leafBlade.name = "Frond_Blade_" + f;
+            leafBlade.transform.SetParent(obj.transform);
+            Vector3 bladePos = new Vector3(0, 0.08f, 0) + stipeDir * 0.55f;
+            leafBlade.transform.localPosition = bladePos;
+            leafBlade.transform.localRotation = frondYaw * Quaternion.Euler(48f, 0, 0);
+            leafBlade.transform.localScale = new Vector3(0.45f, 0.75f, 0.45f);
+            SetColor(leafBlade, new Color(0.16f, 0.42f, 0.15f), "Mat_FoliageSway");
+        }
+
+        ApplyOrganicNoiseToMesh(obj, 0.08f, 3.2f);
+
+        PrefabUtility.SaveAsPrefabAsset(obj, dir + "/Fento_Prefab.prefab");
+        DestroyImmediate(obj);
+    }
+
     private static void SetColor(GameObject obj, Color color, string matName = "", string textureName = "")
     {
         Renderer r = obj.GetComponent<Renderer>();
         if (r != null)
         {
-            if (!string.IsNullOrEmpty(matName))
+            string resolvedMatName = matName;
+            if (string.IsNullOrEmpty(resolvedMatName))
             {
-                Material loadedMat = AssetDatabase.LoadAssetAtPath<Material>("Assets/Resources/Materials/" + matName + ".mat");
-                if (loadedMat != null)
-                {
-                    r.sharedMaterial = loadedMat;
-                    return;
-                }
+                resolvedMatName = "Mat_Auto_" + ColorUtility.ToHtmlStringRGB(color);
             }
-            Material mat = new Material(Shader.Find("Universal Render Pipeline/Lit"));
-            if (mat.shader == null) mat = new Material(Shader.Find("Standard"));
+
+            string matPath = "Assets/Resources/Materials/" + resolvedMatName + ".mat";
+            Material loadedMat = AssetDatabase.LoadAssetAtPath<Material>(matPath);
+            if (loadedMat != null)
+            {
+                r.sharedMaterial = loadedMat;
+                return;
+            }
+
+            Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+            if (shader == null) shader = Shader.Find("Standard");
+
+            Material mat = new Material(shader);
+            mat.SetColor("_BaseColor", color);
             mat.color = color;
+            mat.SetFloat("_Smoothness", 0.2f);
             mat.enableInstancing = true;
             
             if (!string.IsNullOrEmpty(textureName))
@@ -1138,23 +1938,28 @@ public class FragaAssetGenerator : MonoBehaviour
                     mat.SetTexture("_BaseMap", tex);
                     mat.SetTexture("_MainTex", tex);
                     mat.color = Color.white;
+                    mat.SetColor("_BaseColor", Color.white);
                 }
             }
 
-            if (!string.IsNullOrEmpty(matName))
-            {
-                if (!System.IO.Directory.Exists("Assets/Resources/Materials"))
-                    System.IO.Directory.CreateDirectory("Assets/Resources/Materials");
-                AssetDatabase.CreateAsset(mat, "Assets/Resources/Materials/" + matName + ".mat");
-                AssetDatabase.SaveAssets();
-            }
+            if (!System.IO.Directory.Exists("Assets/Resources/Materials"))
+                System.IO.Directory.CreateDirectory("Assets/Resources/Materials");
+
+            AssetDatabase.CreateAsset(mat, matPath);
+            AssetDatabase.SaveAssets();
+
             r.sharedMaterial = mat;
         }
     }
 
-    private static void ApplyOrganicNoiseToMesh(GameObject obj, float intensity, float scale)
+        private static void ApplyOrganicNoiseToMesh(GameObject obj, float intensity, float scale)
     {
         MeshFilter[] mfs = obj.GetComponentsInChildren<MeshFilter>();
+        int meshIndex = 0;
+        string meshDir = "Assets/Art/Meshes";
+        if (!System.IO.Directory.Exists(meshDir))
+            System.IO.Directory.CreateDirectory(meshDir);
+
         foreach (var mf in mfs)
         {
             if (mf.sharedMesh == null) continue;
@@ -1170,10 +1975,16 @@ public class FragaAssetGenerator : MonoBehaviour
             }
             m.vertices = verts;
             m.RecalculateNormals();
+            m.RecalculateTangents();
+            m.name = $"{obj.name}_{mf.gameObject.name}_{meshIndex}";
+
+            string meshPath = $"{meshDir}/{obj.name}_{mf.gameObject.name}_{meshIndex}.asset";
+            AssetDatabase.CreateAsset(m, meshPath);
             mf.sharedMesh = m;
             
             MeshCollider mc = mf.gameObject.GetComponent<MeshCollider>();
             if (mc != null) mc.sharedMesh = m;
+            meshIndex++;
         }
     }
     private static void GenerateFarolCeltaPrefab(string dir)
@@ -1201,14 +2012,14 @@ public class FragaAssetGenerator : MonoBehaviour
         ring.transform.localScale = new Vector3(3.5f, 0.5f, 3.5f);
         SetColor(ring, new Color(0.15f, 0.15f, 0.15f), "Mat_Ruins_Iron");
         
-        // CÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Âºpula (Farol Core)
+        // Cupula e Luz do Farol
         GameObject core = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         core.transform.SetParent(farolObj.transform);
         core.transform.localPosition = new Vector3(0, 18f, 0);
         core.transform.localScale = new Vector3(2.5f, 2.5f, 2.5f);
-        SetColor(core, new Color(0.1f, 0.5f, 1f)); // Vidro azulado antes de acender
+        SetColor(core, new Color(0.1f, 0.5f, 1f), "Mat_Emissive_HolyWater"); // Vidro azulado antes de acender
         
-        // Adicionar Componentes LÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³gicos
+        // Elemento estrutural
         FarolCeltaSystem system = farolObj.AddComponent<FarolCeltaSystem>();
         
         // Criar Luz Real
@@ -1218,11 +2029,97 @@ public class FragaAssetGenerator : MonoBehaviour
         Light l = lightObj.AddComponent<Light>();
         system.farolLight = l;
         
-        // Aplicar ruÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­do sÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³ nas pedras
+        // Elemento estrutural
         ApplyOrganicNoiseToMesh(baseObj, 0.3f, 1.5f);
         ApplyOrganicNoiseToMesh(tower, 0.2f, 2f);
         
         PrefabUtility.SaveAsPrefabAsset(farolObj, dir + "/FarolCelta_Prefab.prefab");
         DestroyImmediate(farolObj);
+    }
+
+    [MenuItem("Fraga Native/5. Reparar Materiais e Prefabs (Remover Rosa/Erros)")]
+    public static void SanitizeAllPrefabs()
+    {
+        string prefabsDir = "Assets/Resources/Prefabs";
+        string matDir = "Assets/Resources/Materials";
+        if (!System.IO.Directory.Exists(prefabsDir)) return;
+
+        Material barkMat = AssetDatabase.LoadAssetAtPath<Material>(matDir + "/Mat_DarkForest_Bark.mat");
+        Material foliageMat = AssetDatabase.LoadAssetAtPath<Material>(matDir + "/Mat_OakFoliage.mat");
+        Material rockMat = AssetDatabase.LoadAssetAtPath<Material>(matDir + "/Celtic_Stone.mat");
+        Material mossMat = AssetDatabase.LoadAssetAtPath<Material>(matDir + "/Mat_DarkForest_Moss.mat");
+        Material ironMat = AssetDatabase.LoadAssetAtPath<Material>(matDir + "/Mat_Ruins_Iron.mat");
+        Material woodMat = AssetDatabase.LoadAssetAtPath<Material>(matDir + "/Wood_Bark.mat");
+
+        string[] prefabFiles = System.IO.Directory.GetFiles(prefabsDir, "*.prefab");
+        int repairedCount = 0;
+
+        foreach (var pFile in prefabFiles)
+        {
+            string unityPath = pFile.Replace("\\", "/");
+            GameObject prefabAsset = AssetDatabase.LoadAssetAtPath<GameObject>(unityPath);
+            if (prefabAsset == null) continue;
+
+            GameObject inst = (GameObject)PrefabUtility.InstantiatePrefab(prefabAsset);
+            bool modified = false;
+
+            Renderer[] rends = inst.GetComponentsInChildren<Renderer>(true);
+            foreach (var r in rends)
+            {
+                MeshFilter mf = r.GetComponent<MeshFilter>();
+                int subCount = (mf != null && mf.sharedMesh != null) ? Mathf.Max(1, mf.sharedMesh.subMeshCount) : 1;
+                Material[] mats = r.sharedMaterials;
+                bool needsFix = (mats == null || mats.Length < subCount);
+                if (!needsFix)
+                {
+                    for (int m = 0; m < mats.Length; m++)
+                    {
+                        if (mats[m] == null || mats[m].shader == null || mats[m].shader.name.Contains("Error") || mats[m].shader.name == "Hidden/InternalErrorShader")
+                        {
+                            needsFix = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (needsFix)
+                {
+                    Material[] fixedMats = new Material[subCount];
+                    for (int s = 0; s < subCount; s++)
+                    {
+                        if (mats != null && s < mats.Length && mats[s] != null && mats[s].shader != null && !mats[s].shader.name.Contains("Error") && mats[s].shader.name != "Hidden/InternalErrorShader")
+                        {
+                            fixedMats[s] = mats[s];
+                        }
+                        else
+                        {
+                            string oName = r.gameObject.name.ToLower();
+                            string pName = prefabAsset.name.ToLower();
+                            if (oName.Contains("berry") || pName.Contains("berry")) fixedMats[s] = foliageMat ?? mossMat;
+                            else if (oName.Contains("foliage") || oName.Contains("leaf") || oName.Contains("bush") || oName.Contains("fern") || oName.Contains("fento")) fixedMats[s] = foliageMat;
+                            else if (oName.Contains("stone") || oName.Contains("rock") || oName.Contains("altar") || oName.Contains("cross") || oName.Contains("grave")) fixedMats[s] = rockMat;
+                            else if (oName.Contains("iron") || oName.Contains("metal") || oName.Contains("wire")) fixedMats[s] = ironMat;
+                            else if (oName.Contains("wood") || oName.Contains("log") || oName.Contains("plank") || oName.Contains("workbench")) fixedMats[s] = woodMat ?? barkMat;
+                            else if (oName.Contains("bark") || oName.Contains("trunk")) fixedMats[s] = barkMat;
+                            else if (pName.Contains("player")) fixedMats[s] = barkMat;
+                            else fixedMats[s] = barkMat;
+                        }
+                    }
+                    r.sharedMaterials = fixedMats;
+                    modified = true;
+                }
+            }
+
+            if (modified)
+            {
+                PrefabUtility.SaveAsPrefabAsset(inst, unityPath);
+                repairedCount++;
+            }
+            DestroyImmediate(inst);
+        }
+
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
+        Debug.Log($"[FragaAssetGenerator] SanitizeAllPrefabs concluído! {repairedCount} prefabs corrigidos sem materiais rosa.");
     }
 }

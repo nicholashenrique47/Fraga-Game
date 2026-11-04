@@ -14,7 +14,7 @@ public class ResourcePickup : MonoBehaviour
         Rigidbody rb = GetComponent<Rigidbody>();
         if (rb != null)
         {
-            rb.velocity = new Vector3(Random.Range(-3f, 3f), Random.Range(2f, 5f), Random.Range(-3f, 3f));
+            rb.linearVelocity = new Vector3(Random.Range(-3f, 3f), Random.Range(2f, 5f), Random.Range(-3f, 3f));
             rb.angularVelocity = new Vector3(Random.Range(-5f, 5f), Random.Range(-5f, 5f), Random.Range(-5f, 5f));
         }
     }

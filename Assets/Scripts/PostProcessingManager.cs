@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using System.Collections;
+using UnityEngine.UI;
 
 /// PostProcessingManager: Gere todos os efeitos visuais AAA de dano, morte e tensao.
 /// Opera sobre o Volume URP global e sincroniza com HapticManager para feedback fisico.
@@ -12,6 +13,11 @@ public class PostProcessingManager : MonoBehaviour
     public SanitySystem sanitySystem;
     public HapticManager hapticManager;
     public Volume postProcessVolume;
+    public PlayerStatus playerStatus;
+
+    [Header("Cold Breathing Effect")]
+    public float breathingFogThreshold = 8f; // Temperatura abaixo da qual o bafo aparece (apenas no frio real)
+    private CanvasGroup breathFogOverlay; // Overlay branco semitransparente que pulsa
 
     [Header("Death Sequence")]
     public float deathFadeDuration = 2.5f;
@@ -30,6 +36,7 @@ public class PostProcessingManager : MonoBehaviour
     private MotionBlur motionBlur;
     private Bloom bloom;
     private DepthOfField depthOfField;
+    private Tonemapping tonemapping;
 
     // Estado interno
     private float lastSanity = 100f;
@@ -38,7 +45,7 @@ public class PostProcessingManager : MonoBehaviour
     private float deathSequenceTimer = 0f;
 
     // Valores base capturados no Start para interpolar contra
-    private float baseVignetteIntensity = 0.15f;
+    private float baseVignetteIntensity = 0.08f;
     private float baseSaturation = 0f;
     private float baseContrast = 0f;
     private float baseGrainIntensity = 0f;
@@ -47,14 +54,40 @@ public class PostProcessingManager : MonoBehaviour
 
     private void Start()
     {
-        if (postProcessVolume == null || postProcessVolume.profile == null)
+        if (sanitySystem == null) sanitySystem = FindAnyObjectByType<SanitySystem>();
+        if (playerStatus == null) playerStatus = FindAnyObjectByType<PlayerStatus>();
+
+        // 0. Garante que o deathOverlay comece 100% invisível e não-bloqueante
+        if (deathOverlay == null)
         {
-            Debug.LogError("[PostProcessingManager] Volume URP nao assinalado. Criando profile em runtime.");
-            if (postProcessVolume != null)
+            var overlayObj = GameObject.Find("Death_Overlay");
+            if (overlayObj != null) deathOverlay = overlayObj.GetComponent<CanvasGroup>();
+        }
+
+        if (deathOverlay != null)
+        {
+            deathOverlay.alpha = 0f;
+            deathOverlay.blocksRaycasts = false;
+            deathOverlay.interactable = false;
+        }
+
+        isDeathSequenceActive = false;
+        deathSequenceTimer = 0f;
+
+        if (postProcessVolume == null)
+        {
+            postProcessVolume = FindAnyObjectByType<Volume>();
+            if (postProcessVolume == null)
             {
-                postProcessVolume.profile = ScriptableObject.CreateInstance<VolumeProfile>();
+                Debug.LogWarning("[PostProcessingManager] Volume URP nao encontrado na cena.");
+                return;
             }
-            return;
+        }
+
+        if (postProcessVolume.profile == null)
+        {
+            Debug.Log("[PostProcessingManager] Profile nao encontrado no Volume. Criando VolumeProfile em runtime.");
+            postProcessVolume.profile = ScriptableObject.CreateInstance<VolumeProfile>();
         }
 
         // Extrair ou criar overrides
@@ -66,6 +99,7 @@ public class PostProcessingManager : MonoBehaviour
         EnsureOverride(out motionBlur);
         EnsureOverride(out bloom);
         EnsureOverride(out depthOfField);
+        EnsureOverride(out tonemapping);
 
         // Configurar estados iniciais
         if (vignette != null)
@@ -73,12 +107,14 @@ public class PostProcessingManager : MonoBehaviour
             vignette.intensity.overrideState = true;
             vignette.color.overrideState = true;
             vignette.smoothness.overrideState = true;
+            vignette.intensity.value = baseVignetteIntensity;
         }
         if (colorAdjustments != null)
         {
             colorAdjustments.saturation.overrideState = true;
             colorAdjustments.contrast.overrideState = true;
             colorAdjustments.postExposure.overrideState = true;
+            colorAdjustments.postExposure.value = 0.50f; // Clareamento suave e limpo The Forest
         }
         if (filmGrain != null)
         {
@@ -100,12 +136,17 @@ public class PostProcessingManager : MonoBehaviour
             motionBlur.quality.overrideState = true;
             motionBlur.quality.value = MotionBlurQuality.Low; // Mobile-safe
         }
+        if (tonemapping != null)
+        {
+            tonemapping.mode.overrideState = true;
+            tonemapping.mode.value = TonemappingMode.ACES;
+        }
         if (bloom != null)
         {
             bloom.intensity.overrideState = true;
             bloom.threshold.overrideState = true;
-            bloom.intensity.value = 0.5f;
-            bloom.threshold.value = 0.9f;
+            bloom.intensity.value = 0.35f;
+            bloom.threshold.value = 1.15f;
         }
         if (depthOfField != null)
         {
@@ -114,9 +155,9 @@ public class PostProcessingManager : MonoBehaviour
             depthOfField.gaussianStart.overrideState = true;
             depthOfField.gaussianEnd.overrideState = true;
             depthOfField.gaussianMaxRadius.overrideState = true;
-            depthOfField.gaussianStart.value = 5f;
-            depthOfField.gaussianEnd.value = 20f;
-            depthOfField.gaussianMaxRadius.value = 1f;
+            depthOfField.gaussianStart.value = 8f;
+            depthOfField.gaussianEnd.value = 40f;
+            depthOfField.gaussianMaxRadius.value = 0.8f;
         }
     }
 
@@ -151,9 +192,17 @@ public class PostProcessingManager : MonoBehaviour
             {
                 hapticManager.TriggerHeavyVibration();
             }
+
+            // Screen Shake proporcional ao dano
+            if (ScreenShakeSystem.Instance != null)
+            {
+                float shakeIntensity = Mathf.Clamp01(sanityDelta / 30f);
+                ScreenShakeSystem.Instance.AddTrauma(shakeIntensity * 0.5f);
+            }
         }
 
         UpdateAmbientPostProcessing(sanity);
+        UpdateBreathingFog();
         lastSanity = sanity;
     }
 
@@ -189,8 +238,8 @@ public class PostProcessingManager : MonoBehaviour
         // Camada 1: Vignette (suave -> agressivo vermelho escuro)
         if (vignette != null)
         {
-            vignette.intensity.value = Mathf.Lerp(baseVignetteIntensity, 0.65f, t);
-            vignette.smoothness.value = Mathf.Lerp(0.2f, 0.8f, t);
+            vignette.intensity.value = Mathf.Lerp(baseVignetteIntensity, 0.45f, t);
+            vignette.smoothness.value = Mathf.Lerp(0.2f, 0.65f, t);
 
             // Transicao de cor: preto -> vermelho escuro -> vermelho saturado
             Color vignetteColor;
@@ -201,48 +250,47 @@ public class PostProcessingManager : MonoBehaviour
             else
             {
                 float panicT = (50f - sanity) / 50f;
-                vignetteColor = Color.Lerp(new Color(0.2f, 0f, 0f), new Color(0.5f, 0f, 0f), panicT);
+                vignetteColor = Color.Lerp(new Color(0.2f, 0f, 0f), new Color(0.45f, 0f, 0f), panicT);
 
-                // Pulsacao ritmica da vignette em panico
-                float pulse = Mathf.Sin(Time.time * (3f + panicT * 8f)) * 0.5f + 0.5f;
-                vignette.intensity.value += pulse * 0.15f * panicT;
+                // Pulsacao suave de batimento cardiaco na vignette em panico (sem efeito estroboscopico)
+                float pulse = Mathf.Sin(Time.time * 2.2f) * 0.5f + 0.5f;
+                vignette.intensity.value += pulse * 0.05f * panicT;
             }
             vignette.color.value = vignetteColor;
         }
 
-        // Camada 2: Dessaturacao progressiva e contraste
+        // Camada 2: Dessaturacao progressiva e exposicao clara
         if (colorAdjustments != null)
         {
-            colorAdjustments.saturation.value = Mathf.Lerp(baseSaturation, -85f, t);
-            colorAdjustments.contrast.value = Mathf.Lerp(baseContrast, 40f, t);
+            colorAdjustments.saturation.value = Mathf.Lerp(baseSaturation, -50f, t);
+            colorAdjustments.contrast.value = Mathf.Lerp(baseContrast, 20f, t);
 
-            // Exposicao: escurece ligeiramente em panico
+            // Exposicao: sempre nítido (+0.50 EV) durante jogo normal, escurece apenas em pânico real extremo
             if (sanity < 20f)
             {
                 float darkT = (20f - sanity) / 20f;
-                colorAdjustments.postExposure.value = Mathf.Lerp(0f, -1.5f, darkT);
+                colorAdjustments.postExposure.value = Mathf.Lerp(0.50f, -0.25f, darkT);
             }
             else
             {
-                colorAdjustments.postExposure.value = 0f;
+                colorAdjustments.postExposure.value = 0.50f;
             }
         }
 
         // Camada 3: Film Grain (paranoia visual)
         if (filmGrain != null)
         {
-            filmGrain.intensity.value = Mathf.Lerp(baseGrainIntensity, 0.95f, t);
+            filmGrain.intensity.value = Mathf.Lerp(baseGrainIntensity, 0.65f, t);
         }
 
         // Camada 4: Distorcao de lente (instabilidade mental)
         if (lensDistortion != null)
         {
-            if (sanity < 40f)
+            if (sanity < 35f)
             {
-                float distT = (40f - sanity) / 40f;
-                // Oscilacao ondulante da distorcao
-                float wave = Mathf.Sin(Time.time * 2.5f) * distT;
-                lensDistortion.intensity.value = Mathf.Lerp(baseLensDistortion, -0.4f, distT) + wave * 0.1f;
+                float distT = (35f - sanity) / 35f;
+                float wave = Mathf.Sin(Time.time * 2.0f) * distT;
+                lensDistortion.intensity.value = Mathf.Lerp(baseLensDistortion, -0.2f, distT) + wave * 0.05f;
             }
             else
             {
@@ -253,10 +301,10 @@ public class PostProcessingManager : MonoBehaviour
         // Camada 5: Aberracao cromatica (visao danificada)
         if (chromaticAberration != null)
         {
-            if (sanity < 30f)
+            if (sanity < 25f)
             {
-                float chromaT = (30f - sanity) / 30f;
-                chromaticAberration.intensity.value = Mathf.Lerp(baseChromaticAberration, 0.8f, chromaT);
+                float chromaT = (25f - sanity) / 25f;
+                chromaticAberration.intensity.value = Mathf.Lerp(baseChromaticAberration, 0.45f, chromaT);
             }
             else
             {
@@ -267,7 +315,7 @@ public class PostProcessingManager : MonoBehaviour
         // Camada 6: Motion Blur em panico extremo
         if (motionBlur != null)
         {
-            motionBlur.intensity.value = sanity < 15f ? Mathf.Lerp(0f, 0.5f, (15f - sanity) / 15f) : 0f;
+            motionBlur.intensity.value = sanity < 12f ? Mathf.Lerp(0f, 0.3f, (12f - sanity) / 12f) : 0f;
         }
     }
 
@@ -284,17 +332,67 @@ public class PostProcessingManager : MonoBehaviour
 
             if (vignette != null)
             {
-                vignette.intensity.value += flashCurve * 0.3f * normalizedIntensity;
-                vignette.color.value = Color.Lerp(vignette.color.value, new Color(0.8f, 0f, 0f), flashCurve);
+                vignette.intensity.value += flashCurve * 0.15f * normalizedIntensity;
+                vignette.color.value = Color.Lerp(vignette.color.value, new Color(0.6f, 0f, 0f), flashCurve);
             }
 
             if (chromaticAberration != null)
             {
-                chromaticAberration.intensity.value += flashCurve * 0.5f * normalizedIntensity;
+                chromaticAberration.intensity.value += flashCurve * 0.3f * normalizedIntensity;
             }
 
-            elapsed += Time.unscaledDeltaTime; // unscaledDeltaTime para funcionar durante a pausa
+            elapsed += Time.unscaledDeltaTime;
             yield return null;
+        }
+    }
+
+    /// Atualiza o efeito de bafo de frio (breathing fog)
+    private void UpdateBreathingFog()
+    {
+        if (playerStatus == null) return;
+
+        float temp = playerStatus.bodyTemperature;
+        if (temp < breathingFogThreshold)
+        {
+            if (breathFogOverlay == null)
+            {
+                GameObject fogObj = new GameObject("BreathFogOverlay");
+                Canvas canvas = fogObj.AddComponent<Canvas>();
+                canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                canvas.sortingOrder = 90;
+
+                CanvasScaler scaler = fogObj.AddComponent<CanvasScaler>();
+                scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+                scaler.referenceResolution = new Vector2(1920, 1080);
+
+                GameObject imgObj = new GameObject("FogImage");
+                imgObj.transform.SetParent(fogObj.transform);
+                RectTransform imgRect = imgObj.AddComponent<RectTransform>();
+                imgRect.anchorMin = Vector2.zero;
+                imgRect.anchorMax = Vector2.one;
+                imgRect.offsetMin = Vector2.zero;
+                imgRect.offsetMax = Vector2.zero;
+
+                Image fogImg = imgObj.AddComponent<Image>();
+                fogImg.color = new Color(0.85f, 0.9f, 1f, 0.04f);
+                fogImg.raycastTarget = false;
+
+                breathFogOverlay = fogObj.AddComponent<CanvasGroup>();
+                breathFogOverlay.alpha = 0f;
+                breathFogOverlay.blocksRaycasts = false;
+                breathFogOverlay.interactable = false;
+            }
+
+            float coldT = Mathf.Clamp01((breathingFogThreshold - temp) / breathingFogThreshold);
+            float breathCycle = Mathf.Sin(Time.time * 1.5f) * 0.5f + 0.5f;
+            breathFogOverlay.alpha = coldT * breathCycle * 0.06f;
+        }
+        else
+        {
+            if (breathFogOverlay != null && breathFogOverlay.alpha > 0f)
+            {
+                breathFogOverlay.alpha = Mathf.Lerp(breathFogOverlay.alpha, 0f, Time.deltaTime * 3f);
+            }
         }
     }
 
@@ -302,12 +400,22 @@ public class PostProcessingManager : MonoBehaviour
     public void StartDeathSequence()
     {
         if (isDeathSequenceActive) return;
+        if (Time.timeSinceLevelLoad < 3.0f)
+        {
+            Debug.LogWarning("[PostProcessingManager] StartDeathSequence suprimida durante o boot inicial da cena.");
+            return;
+        }
         isDeathSequenceActive = true;
         deathSequenceTimer = 0f;
 
         if (hapticManager != null)
         {
             hapticManager.TriggerHeavyVibration();
+        }
+
+        if (ScreenShakeSystem.Instance != null)
+        {
+            ScreenShakeSystem.Instance.ShakeHeavy();
         }
 
         Debug.Log("[PostProcessingManager] Sequencia de morte iniciada.");
@@ -318,40 +426,26 @@ public class PostProcessingManager : MonoBehaviour
         deathSequenceTimer += Time.unscaledDeltaTime;
         float t = Mathf.Clamp01(deathSequenceTimer / deathFadeDuration);
 
-        // Curva de ease-in para dramatismo
         float easedT = t * t * t;
 
-        // Fade visual progressivo
         if (vignette != null)
         {
-            vignette.intensity.value = Mathf.Lerp(0.5f, 1f, easedT);
-            vignette.smoothness.value = Mathf.Lerp(0.5f, 1f, easedT);
-            vignette.color.value = Color.Lerp(new Color(0.5f, 0f, 0f), Color.black, easedT);
+            vignette.intensity.value = Mathf.Lerp(0.4f, 1f, easedT);
+            vignette.smoothness.value = Mathf.Lerp(0.4f, 1f, easedT);
+            vignette.color.value = Color.Lerp(new Color(0.4f, 0f, 0f), Color.black, easedT);
         }
 
         if (colorAdjustments != null)
         {
-            colorAdjustments.postExposure.value = Mathf.Lerp(-1f, -8f, easedT);
+            colorAdjustments.postExposure.value = Mathf.Lerp(0f, -6f, easedT);
             colorAdjustments.saturation.value = -100f;
         }
 
-        if (filmGrain != null)
-        {
-            filmGrain.intensity.value = 1f;
-        }
-
-        if (lensDistortion != null)
-        {
-            lensDistortion.intensity.value = Mathf.Lerp(-0.3f, -0.6f, easedT);
-        }
-
-        // Fade-to-black via Canvas overlay
         if (deathOverlay != null)
         {
             deathOverlay.alpha = easedT;
         }
 
-        // Sequencia completa
         if (t >= 1f)
         {
             isDeathSequenceActive = false;
@@ -360,13 +454,17 @@ public class PostProcessingManager : MonoBehaviour
         }
     }
 
-    /// Chamado pelo GameManager apos Revive para resetar todos os efeitos visuais.
     public void ResetAllEffects()
+    {
+        ResetEffects();
+    }
+
+    public void ResetEffects()
     {
         isDeathSequenceActive = false;
         deathSequenceTimer = 0f;
-
         if (deathOverlay != null) deathOverlay.alpha = 0f;
+        if (breathFogOverlay != null) breathFogOverlay.alpha = 0f;
 
         if (vignette != null)
         {
@@ -374,17 +472,12 @@ public class PostProcessingManager : MonoBehaviour
             vignette.color.value = Color.black;
             vignette.smoothness.value = 0.2f;
         }
+
         if (colorAdjustments != null)
         {
             colorAdjustments.saturation.value = baseSaturation;
             colorAdjustments.contrast.value = baseContrast;
-            colorAdjustments.postExposure.value = 0f;
+            colorAdjustments.postExposure.value = 0.50f;
         }
-        if (filmGrain != null) filmGrain.intensity.value = baseGrainIntensity;
-        if (lensDistortion != null) lensDistortion.intensity.value = baseLensDistortion;
-        if (chromaticAberration != null) chromaticAberration.intensity.value = baseChromaticAberration;
-        if (motionBlur != null) motionBlur.intensity.value = 0f;
-
-        Debug.Log("[PostProcessingManager] Efeitos visuais resetados.");
     }
 }

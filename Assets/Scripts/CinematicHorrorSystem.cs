@@ -16,7 +16,7 @@ public class CinematicHorrorSystem : MonoBehaviour
     private void Start()
     {
         dayNightCycle = FindAnyObjectByType<DayNightCycle>();
-        if (postProcessingVolume != null)
+        if (postProcessingVolume != null && postProcessingVolume.profile != null)
         {
             postProcessingVolume.profile.TryGet(out colorAdjustments);
         }
@@ -26,8 +26,8 @@ public class CinematicHorrorSystem : MonoBehaviour
     {
         if (dayNightCycle == null) return;
         
-        // Se bateu meia noite (0h)
-        if (dayNightCycle.currentTime >= 0f && dayNightCycle.currentTime < 0.1f && !midnightTriggered)
+        // Se bateu meia noite (0h) apos o jogo estar rodando
+        if (Time.timeSinceLevelLoad > 5.0f && dayNightCycle.currentTime >= 0f && dayNightCycle.currentTime < 0.1f && !midnightTriggered)
         {
             StartCoroutine(MidnightEventRoutine());
         }
@@ -72,7 +72,7 @@ public class CinematicHorrorSystem : MonoBehaviour
         if (sunMoonLight != null)
         {
             sunMoonLight.color = new Color(0.8f, 0f, 0f); // Vermelho puro
-            sunMoonLight.intensity = originalIntensity * 1.5f;
+            sunMoonLight.intensity = Mathf.Max(originalIntensity * 1.5f, 1.2f);
         }
         
         // Retornar a cor gradualmente
@@ -86,8 +86,5 @@ public class CinematicHorrorSystem : MonoBehaviour
             elapsedTime += Time.deltaTime;
             yield return null;
         }
-        
-        // O Trasno apareceu no mapa! (Placeholder spawn logic)
-        // Faunamanger or BossManager spawn
     }
 }

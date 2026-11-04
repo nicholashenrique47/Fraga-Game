@@ -141,6 +141,9 @@ public class BossSystem : MonoBehaviour
                 attackTimer = 2f;
                 HapticManager haptic = FindAnyObjectByType<HapticManager>();
                 if (haptic != null) haptic.TriggerHeavyVibration();
+
+                // Screen Shake no impacto melee
+                if (ScreenShakeSystem.Instance != null) ScreenShakeSystem.Instance.ShakeMedium();
             }
         }
         
@@ -173,6 +176,9 @@ public class BossSystem : MonoBehaviour
         // VFX pulsing
         float scale = 1f + Mathf.Sin(Time.time * 20f) * 0.1f;
         bossInstance.transform.localScale = new Vector3(scale, scale, scale);
+        
+        // Screen Shake contínuo durante channeling
+        if (ScreenShakeSystem.Instance != null) ScreenShakeSystem.Instance.ShakeContinuous(0.15f);
         
         if (stateTimer <= 0)
         {
@@ -214,6 +220,9 @@ public class BossSystem : MonoBehaviour
             if (VFXPoolManager.Instance != null) VFXPoolManager.Instance.PlayDeathVFX(aoeTarget); // Mega smoke
             HapticManager haptic = FindAnyObjectByType<HapticManager>();
             if (haptic != null) haptic.TriggerHeavyVibration();
+
+            // Screen Shake massivo na explosão AoE
+            if (ScreenShakeSystem.Instance != null) ScreenShakeSystem.Instance.ShakeHeavy();
             
             if (aoeIndicator != null) Destroy(aoeIndicator);
             state = BossState.Chasing;

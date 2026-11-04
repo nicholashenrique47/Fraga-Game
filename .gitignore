@@ -107,3 +107,15 @@ InitTestScene*.unity*
 
 # Auto-generated cache in Assets folder
 /[Aa]ssets/[Ss]ceneDependencyCache*
+
+# Temporary development artifacts
+__pycache__/
+*.pyc
+/*screenshot*.png
+/temp_*.png
+/tools/
+/plan_builder/
+Assets/_Recovery/
+Plano_Mestre_*.md
+Prompt_Execucao_*.json
+.idea/

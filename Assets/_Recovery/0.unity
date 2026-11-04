@@ -2852,7 +2852,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 31321ba15b8f8eb4c954353edc038b1d, type: 2}
+  - {fileID: 2100000, guid: f117713459a64454cb52bed714fd2389, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -4081,7 +4081,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 31321ba15b8f8eb4c954353edc038b1d, type: 2}
+  - {fileID: 2100000, guid: f117713459a64454cb52bed714fd2389, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -4439,7 +4439,7 @@ Camera:
   near clip plane: 0.3
   far clip plane: 1000
   field of view: 60
-  orthographic: 1
+  orthographic: 0
   orthographic size: 8
   m_Depth: -1
   m_CullingMask:
@@ -7075,12 +7075,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d0d052b120e1f474d8b951005ac5e533, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DayNightCycle
+  dayDurationRealMinutes: 24
   timeScale: 10
   currentTime: 8
   currentDay: 1
   directionalLight: {fileID: 469996717}
   maxIntensity: 1.2
-  minIntensity: 0.05
+  minIntensity: 0.75
   globalFogVolume: {fileID: 1580430531}
   maxFogWeight: 1
   santaCompanaSystem: {fileID: 1935890312}

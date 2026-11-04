@@ -1,0 +1,47 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Wood_Bark
+  m_Shader: {fileID: 4800000, guid: 42591563674848bfb3f7fe63626e6143, type: 3}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords:
+  - _NORMALMAP
+  m_InvalidKeywords: []
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 1
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _BaseMap:
+        m_Texture: {fileID: 2800000, guid: 15646d3ac99529640b9226ab8c25eede, type: 2}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _BumpMap:
+        m_Texture: {fileID: 2800000, guid: c92c88b3e81208244b0d435f395707b5, type: 2}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    m_Ints: []
+    m_Floats:
+    - _BumpScale: 1.4
+    - _MossHeightCutoff: 2.4
+    - _MossHeightTransition: 0.8
+    - _MossSmoothness: 0.08
+    - _Smoothness: 0.15
+    m_Colors:
+    - _BaseColor: {r: 0.45, g: 0.33, b: 0.2, a: 1}
+    - _MossColor: {r: 0.13, g: 0.28, b: 0.08, a: 1}
+    - _MossDirection: {r: 0, g: 0.3, b: 0.95, a: 0}
+  m_BuildTextureStacks: []
+  m_AllowLocking: 1

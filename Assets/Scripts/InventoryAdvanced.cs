@@ -156,6 +156,9 @@ public class InventoryAdvanced : MonoBehaviour
         return count;
     }
 
+    /// Alias compatível para checagem rápida de quantidade
+    public int CountItem(int itemId) => GetItemCount(itemId);
+
     /// Verifica se um item existe no inventario (pelo menos 1).
     public bool HasItem(int itemId)
     {
@@ -173,7 +176,6 @@ public class InventoryAdvanced : MonoBehaviour
 
         if (data.type == ItemType.Consumable)
         {
-            // Aplicar efeitos de comida
             // Aplicar efeitos de comida e bebida
             if (playerStatus != null)
             {
@@ -224,7 +226,7 @@ public class InventoryAdvanced : MonoBehaviour
                 buildingSystem.ForceBuild(4);
             }
             
-            // Lore: PÃ¡gina do DiÃ¡rio
+            // Lore: Página do Diário
             if (data.id == 116)
             {
                 LoreSystem lore = FindAnyObjectByType<LoreSystem>();

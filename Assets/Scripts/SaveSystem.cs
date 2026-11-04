@@ -46,7 +46,7 @@ public class SaveSystem : MonoBehaviour
 
     public void SaveGame()
     {
-        if (dayNightCycle == null || sanitySystem == null || playerStatus == null || inventory == null) return;
+        if (dayNightCycle == null || sanitySystem == null || playerStatus == null || inventory == null || playerTransform == null) return;
 
         SaveData data = new SaveData();
         
@@ -92,40 +92,61 @@ public class SaveSystem : MonoBehaviour
         string json = File.ReadAllText(savePath);
         SaveData data = JsonUtility.FromJson<SaveData>(json);
 
-        if (data != null)
+        if (data != null && playerTransform != null)
         {
-            // Restaura Posicao
-            Vector3 pos = playerTransform.position;
-            pos.x = data.playerX;
-            pos.z = data.playerY;
-            playerTransform.position = pos;
+            // Restaura Posicao acima do terreno e executa SnapToGround seguro
+            float safeX = Mathf.Clamp(data.playerX, 5f, 95f);
+            float safeZ = Mathf.Clamp(data.playerY, 5f, 95f);
+            float terrainY = TerrainMeshGenerator.GetTerrainHeight(safeX, safeZ);
+            
+            playerTransform.position = new Vector3(safeX, terrainY + 0.25f, safeZ);
+            var pc = playerTransform.GetComponent<PlayerController>();
+            if (pc != null) pc.SnapToGround();
 
-            // Restaura Tempo
-            dayNightCycle.currentTime = data.currentTime;
-            dayNightCycle.currentDay = data.currentDay;
+            // Reposiciona a câmera para evitar olhar para o nada
+            var isoCam = FindFirstObjectByType<IsometricCamera>();
+            if (isoCam != null) isoCam.SnapToTarget();
 
-            // Restaura Status
-            sanitySystem.sanity = data.sanity;
-            sanitySystem.oil = data.oilAmount;
-            playerStatus.bodyTemperature = data.bodyTemperature;
-            playerStatus.stamina = data.stamina;
-            playerStatus.hunger = data.hunger;
+            // Restaura Tempo de forma contínua e segura
+            if (dayNightCycle != null)
+            {
+                dayNightCycle.currentTime = Mathf.Repeat(data.currentTime, 24f);
+                dayNightCycle.currentDay = Mathf.Max(1, data.currentDay);
+            }
+
+            // Restaura Status com garantias mínimas seguras (previne loop de morte)
+            if (sanitySystem != null)
+            {
+                sanitySystem.sanity = Mathf.Max(data.sanity, 50f);
+                sanitySystem.oil = Mathf.Max(data.oilAmount, 50f);
+            }
+            if (playerStatus != null)
+            {
+                playerStatus.health = Mathf.Max(playerStatus.health, 50f);
+                playerStatus.bodyTemperature = Mathf.Max(data.bodyTemperature, 16f);
+                playerStatus.stamina = Mathf.Max(data.stamina, 50f);
+                playerStatus.hunger = Mathf.Max(data.hunger, 50f);
+                playerStatus.thirst = 100f;
+            }
 
             // Restaura Inventario
-            for (int i = 0; i < inventory.slots.Length; i++)
+            if (inventory != null && inventory.slots != null)
             {
-                inventory.slots[i].Clear();
-            }
-            
-            for (int i = 0; i < data.inventoryItemIDs.Count && i < inventory.slots.Length; i++)
-            {
-                inventory.slots[i].itemId = data.inventoryItemIDs[i];
-                inventory.slots[i].quantity = data.inventoryItemAmounts[i];
-                
-                ItemData itemData = ItemDatabase.GetItem(data.inventoryItemIDs[i]);
-                if (itemData != null)
+                for (int i = 0; i < inventory.slots.Length; i++)
                 {
-                    inventory.slots[i].durability = itemData.isPerishable ? itemData.maxDurability : -1f;
+                    inventory.slots[i].Clear();
+                }
+                
+                for (int i = 0; i < data.inventoryItemIDs.Count && i < inventory.slots.Length; i++)
+                {
+                    inventory.slots[i].itemId = data.inventoryItemIDs[i];
+                    inventory.slots[i].quantity = data.inventoryItemAmounts[i];
+                    
+                    ItemData itemData = ItemDatabase.GetItem(data.inventoryItemIDs[i]);
+                    if (itemData != null)
+                    {
+                        inventory.slots[i].durability = itemData.isPerishable ? itemData.maxDurability : -1f;
+                    }
                 }
             }
 
