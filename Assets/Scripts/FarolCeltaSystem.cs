@@ -116,7 +116,7 @@ public class FarolCeltaSystem : MonoBehaviour
         {
             farolLight.enabled = true;
             farolLight.intensity = 50f;
-            farolLight.range = 500f; // Ilumina a ilha inteira
+            farolLight.range = 650f; // Ilumina o cabo e o mar atlântico inteiro
             farolLight.color = new Color(1f, 0.4f, 0.1f); // Laranja Sagrado Intenso
             farolLight.type = LightType.Spot;
             farolLight.spotAngle = 60f;
@@ -142,7 +142,7 @@ public class FarolCeltaSystem : MonoBehaviour
         UIManager ui = FindAnyObjectByType<UIManager>();
         if (ui != null)
         {
-            // Poderiamos adicionar um painel de Win
+            ui.SetLootTooltip("FAROL CELTA ACESO! A LUZ PURIFICOU A FRAGA!");
             Debug.Log("=====================================");
             Debug.Log("VITÓRIA! A LUZ DO FAROL PURIFICOU A FRAGA!");
             Debug.Log("=====================================");

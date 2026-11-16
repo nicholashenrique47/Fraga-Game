@@ -1,19 +1,20 @@
 ﻿using UnityEngine;
 
 /// <summary>
-/// BowAndArrowSystem: Sistema balístico de arco curto artesanal de teixo.
-/// Suporta mira orgânica diegética, retesamento com consumo de fôlego e tiro balístico parabólico.
+/// BowAndArrowSystem: Sistema balistico do Arco de Sobrevivencia (ID 305) com Flechas (110) e Flechas Penadas (117).
+/// Integrado ao EquipmentSystem / FragaInputRouter e ao FirstPersonViewmodelController.
 /// </summary>
 public class BowAndArrowSystem : MonoBehaviour
 {
     public static BowAndArrowSystem Instance { get; private set; }
 
     [Header("Bow Settings")]
-    public float maxDrawTime = 1.35f;
-    public float minArrowSpeed = 15f;
-    public float maxArrowSpeed = 52f;
-    public float baseDamage = 45f;
-    public float staminaDrainPerSecond = 14f;
+    public float maxDrawTime = 1.15f;
+    public float minArrowSpeed = 20f;
+    public float maxArrowSpeed = 54f;
+    public float baseDamage = 55f;
+    public float staminaDrainPerSecond = 11f;
+    public float bowAimFOV = 46f;
 
     [Header("Dependencies")]
     public Camera playerCamera;
@@ -22,13 +23,16 @@ public class BowAndArrowSystem : MonoBehaviour
 
     private bool isAiming = false;
     private float drawProgress = 0f;
+    private int activeArrowId = 110;
+
     private AudioSource audioSource;
     private AudioClip drawClip;
     private AudioClip releaseClip;
     private AudioClip dryFireClip;
+    private GameObject arrowPrefabCache;
 
-    private GameObject bowVisual;
-    private GameObject arrowVisual;
+    public bool IsAiming => isAiming;
+    public float DrawProgress => drawProgress;
 
     private void Awake()
     {
@@ -39,10 +43,9 @@ public class BowAndArrowSystem : MonoBehaviour
     private void Start()
     {
         if (playerCamera == null) playerCamera = Camera.main;
-        if (inventory == null) inventory = FindAnyObjectByType<InventoryAdvanced>();
-        if (playerStatus == null) playerStatus = FindAnyObjectByType<PlayerStatus>();
-
-        CreateProceduralBowVisual();
+        if (inventory == null) inventory = InventoryAdvanced.Instance ?? FindAnyObjectByType<InventoryAdvanced>();
+        if (playerStatus == null) playerStatus = PlayerStatus.Instance ?? FindAnyObjectByType<PlayerStatus>();
+        arrowPrefabCache = Resources.Load<GameObject>("Prefabs/Arrow_Prefab");
     }
 
     private void SetupAudio()
@@ -56,86 +59,42 @@ public class BowAndArrowSystem : MonoBehaviour
         dryFireClip = GenerateDryFireSound();
     }
 
-    private void CreateProceduralBowVisual()
+    public bool HasAnyArrow()
     {
-        if (playerCamera == null) playerCamera = Camera.main;
-        if (playerCamera == null) return;
-
-        // Cria objeto do arco rústico de teixo
-        bowVisual = new GameObject("Procedural_Bow");
-        bowVisual.transform.SetParent(playerCamera.transform, false);
-        bowVisual.transform.localPosition = new Vector3(0.28f, -0.22f, 0.48f);
-        bowVisual.transform.localRotation = Quaternion.Euler(15f, -8f, -12f);
-
-        // Haste de madeira do arco (cilindro curvo / esticado)
-        GameObject stave = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        Destroy(stave.GetComponent<Collider>());
-        stave.name = "Bow_Stave";
-        stave.transform.SetParent(bowVisual.transform, false);
-        stave.transform.localPosition = Vector3.zero;
-        stave.transform.localScale = new Vector3(0.045f, 0.52f, 0.045f);
-        stave.transform.localRotation = Quaternion.Euler(0, 0, 75f);
-
-        Material woodMat = Resources.Load<Material>("Materials/Mat_DarkForest_Bark");
-        if (woodMat == null) woodMat = Resources.Load<Material>("Materials/Wood_Bark");
-        if (woodMat != null) stave.GetComponent<MeshRenderer>().sharedMaterial = woodMat;
-
-        // Flecha nockada (visível apenas ao retesar)
-        arrowVisual = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        Destroy(arrowVisual.GetComponent<Collider>());
-        arrowVisual.name = "Bow_NockedArrow";
-        arrowVisual.transform.SetParent(bowVisual.transform, false);
-        arrowVisual.transform.localPosition = new Vector3(0, 0, 0.25f);
-        arrowVisual.transform.localScale = new Vector3(0.02f, 0.45f, 0.02f);
-        arrowVisual.transform.localRotation = Quaternion.Euler(90f, 0, 0);
-        if (woodMat != null) arrowVisual.GetComponent<MeshRenderer>().sharedMaterial = woodMat;
-
-        arrowVisual.SetActive(false);
-        bowVisual.SetActive(false); // Ativa quando o arco estiver selecionado
+        if (inventory == null) inventory = InventoryAdvanced.Instance;
+        return inventory != null && (inventory.HasItem(117) || inventory.HasItem(110));
     }
 
-    private void Update()
+    private int SelectBestArrowId()
     {
-        // Verifica se o jogador possui o arco no inventário (ID 310)
-        bool hasBow = inventory != null && (inventory.HasItem(310) || inventory.HasItem(300));
-        if (bowVisual != null) bowVisual.SetActive(hasBow);
-
-        if (!hasBow) return;
-
-        // Entrada PC: Botão Direito do Mouse mira/retesa, soltar atira
-        if (Input.GetMouseButtonDown(1))
-        {
-            StartAiming();
-        }
-
-        if (isAiming)
-        {
-            if (Input.GetMouseButton(1))
-            {
-                UpdateAiming();
-            }
-            else if (Input.GetMouseButtonUp(1))
-            {
-                ReleaseArrow();
-            }
-        }
+        if (inventory == null) return 110;
+        if (inventory.HasItem(117)) return 117; // Flecha Penada primeiro (+45% velocidade/dano)
+        if (inventory.HasItem(110)) return 110; // Flechas de Pedra
+        return -1;
     }
 
     public void StartAiming()
     {
-        if (inventory != null && !inventory.HasItem(320))
+        if (inventory == null) inventory = InventoryAdvanced.Instance;
+        if (playerStatus == null) playerStatus = PlayerStatus.Instance;
+
+        int arrowId = SelectBestArrowId();
+        if (arrowId < 0)
         {
             if (audioSource != null && dryFireClip != null)
-                audioSource.PlayOneShot(dryFireClip, 0.6f);
+                audioSource.PlayOneShot(dryFireClip, 0.65f);
 
-            HUDSurvivalOverlay hud = FindAnyObjectByType<HUDSurvivalOverlay>();
-            if (hud != null) hud.ShowLootTooltip("Sem flechas na mochila! (Fabricar Flecha ID 320)");
+            if (HUDSurvivalOverlay.Instance != null)
+                HUDSurvivalOverlay.Instance.ShowLootTooltip("Sem flechas! Fabrique Flechas (110/117).");
             return;
         }
 
+        activeArrowId = arrowId;
         isAiming = true;
-        drawProgress = 0f;
-        if (arrowVisual != null) arrowVisual.SetActive(true);
+        drawProgress = 0.1f;
+
+        if (FirstPersonViewmodelController.Instance != null)
+            FirstPersonViewmodelController.Instance.SetBowDraw(true, drawProgress);
 
         if (audioSource != null && drawClip != null)
         {
@@ -144,26 +103,54 @@ public class BowAndArrowSystem : MonoBehaviour
         }
     }
 
-    private void UpdateAiming()
+    public void UpdateAimTick()
     {
+        if (!isAiming) return;
+
         drawProgress = Mathf.Min(drawProgress + Time.deltaTime / maxDrawTime, 1.0f);
 
-        // Recua a flecha visual conforme a corda estica
-        if (arrowVisual != null)
-        {
-            arrowVisual.transform.localPosition = new Vector3(0, 0, 0.25f - drawProgress * 0.16f);
-        }
+        if (FirstPersonViewmodelController.Instance != null)
+            FirstPersonViewmodelController.Instance.SetBowDraw(true, drawProgress);
 
-        // Drena estamina do jogador
+        if (FirstPersonCamera.Instance != null)
+            FirstPersonCamera.Instance.SetAimFOVOverride(Mathf.Lerp(62f, bowAimFOV, drawProgress));
+
         if (playerStatus != null)
         {
-            playerStatus.stamina = Mathf.Max(0, playerStatus.stamina - staminaDrainPerSecond * Time.deltaTime);
+            playerStatus.stamina = Mathf.Max(0f, playerStatus.stamina - staminaDrainPerSecond * Time.deltaTime);
             if (playerStatus.stamina <= 0f)
             {
-                // Fadiga extrema força o disparo fraco
                 ReleaseArrow();
             }
         }
+    }
+
+    public void CancelAim()
+    {
+        if (!isAiming) return;
+        isAiming = false;
+        drawProgress = 0f;
+        if (FirstPersonViewmodelController.Instance != null)
+            FirstPersonViewmodelController.Instance.SetBowDraw(false, 0f);
+        if (FirstPersonCamera.Instance != null)
+            FirstPersonCamera.Instance.SetAimFOVOverride(-1f);
+    }
+
+    public void QuickShot()
+    {
+        int arrowId = SelectBestArrowId();
+        if (arrowId < 0)
+        {
+            if (audioSource != null && dryFireClip != null) audioSource.PlayOneShot(dryFireClip, 0.65f);
+            if (HUDSurvivalOverlay.Instance != null)
+                HUDSurvivalOverlay.Instance.ShowLootTooltip("Sem flechas na mochila!");
+            return;
+        }
+
+        activeArrowId = arrowId;
+        isAiming = true;
+        drawProgress = 0.45f;
+        ReleaseArrow();
     }
 
     public void ReleaseArrow()
@@ -171,14 +158,20 @@ public class BowAndArrowSystem : MonoBehaviour
         if (!isAiming) return;
         isAiming = false;
 
-        if (arrowVisual != null) arrowVisual.SetActive(false);
+        if (FirstPersonViewmodelController.Instance != null)
+            FirstPersonViewmodelController.Instance.SetBowDraw(false, 0f);
+        if (FirstPersonCamera.Instance != null)
+            FirstPersonCamera.Instance.SetAimFOVOverride(-1f);
 
-        if (drawProgress < 0.15f) return; // Cancelamento suave
+        if (drawProgress < 0.14f) return;
 
-        // Consome 1 flecha
+        int arrowId = SelectBestArrowId();
+        if (arrowId < 0) return;
+        activeArrowId = arrowId;
+
         if (inventory != null)
         {
-            inventory.RemoveItem(320, 1);
+            inventory.RemoveItem(activeArrowId, 1);
         }
 
         if (audioSource != null && releaseClip != null)
@@ -187,28 +180,47 @@ public class BowAndArrowSystem : MonoBehaviour
             audioSource.PlayOneShot(releaseClip, 0.9f);
         }
 
-        // Balística da flecha
         if (playerCamera == null) playerCamera = Camera.main;
+        if (playerCamera == null) return;
+
         Vector3 forward = playerCamera.transform.forward;
-        Vector3 spawnPos = playerCamera.transform.position + forward * 0.65f + playerCamera.transform.right * 0.15f - playerCamera.transform.up * 0.12f;
+        Vector3 spawnPos = playerCamera.transform.position + forward * 0.65f + playerCamera.transform.right * 0.12f - playerCamera.transform.up * 0.08f;
 
-        GameObject arrowObj = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        arrowObj.name = "Fired_Arrow";
-        arrowObj.transform.position = spawnPos;
-        arrowObj.transform.localScale = new Vector3(0.025f, 0.45f, 0.025f);
-        arrowObj.transform.rotation = Quaternion.LookRotation(forward);
+        GameObject arrowObj;
+        if (arrowPrefabCache == null) arrowPrefabCache = Resources.Load<GameObject>("Prefabs/Arrow_Prefab");
+        if (arrowPrefabCache != null)
+        {
+            arrowObj = Instantiate(arrowPrefabCache, spawnPos, Quaternion.LookRotation(forward));
+            arrowObj.name = "Fired_Arrow";
+            if (arrowObj.GetComponent<Collider>() == null)
+            {
+                CapsuleCollider col = arrowObj.AddComponent<CapsuleCollider>();
+                col.direction = 2;
+                col.radius = 0.025f;
+                col.height = 0.72f;
+            }
+        }
+        else
+        {
+            arrowObj = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            arrowObj.name = "Fired_Arrow";
+            arrowObj.transform.position = spawnPos;
+            arrowObj.transform.localScale = new Vector3(0.025f, 0.45f, 0.025f);
+            arrowObj.transform.rotation = Quaternion.LookRotation(forward);
 
-        Material woodMat = Resources.Load<Material>("Materials/Mat_DarkForest_Bark");
-        if (woodMat != null) arrowObj.GetComponent<MeshRenderer>().sharedMaterial = woodMat;
+            Material woodMat = Resources.Load<Material>("Materials/Mat_DarkForest_Bark");
+            if (woodMat != null) arrowObj.GetComponent<MeshRenderer>().sharedMaterial = woodMat;
+        }
 
-        Rigidbody rb = arrowObj.AddComponent<Rigidbody>();
+        Rigidbody rb = arrowObj.GetComponent<Rigidbody>() ?? arrowObj.AddComponent<Rigidbody>();
         rb.mass = 0.08f;
         rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
 
-        ArrowProjectile arrowProj = arrowObj.AddComponent<ArrowProjectile>();
-        float speed = Mathf.Lerp(minArrowSpeed, maxArrowSpeed, drawProgress);
-        float damage = baseDamage * Mathf.Lerp(0.5f, 1.4f, drawProgress);
-        arrowProj.Launch(forward * speed, damage);
+        ArrowProjectile arrowProj = arrowObj.GetComponent<ArrowProjectile>() ?? arrowObj.AddComponent<ArrowProjectile>();
+        float bonusMult = (activeArrowId == 117) ? 1.45f : 1.0f;
+        float speed = Mathf.Lerp(minArrowSpeed, maxArrowSpeed, drawProgress) * bonusMult;
+        float damage = baseDamage * Mathf.Lerp(0.55f, 1.45f, drawProgress) * bonusMult;
+        arrowProj.Launch(forward * speed, damage, activeArrowId, transform);
 
         if (FirstPersonCamera.Instance != null)
         {
@@ -216,15 +228,12 @@ public class BowAndArrowSystem : MonoBehaviour
         }
     }
 
-    // =================== SÍNTESE PROCEDURAL DE ÁUDIO ===================
-
     private AudioClip GenerateBowDrawSound()
     {
         int sampleRate = 44100;
         float dur = 0.45f;
         int count = (int)(sampleRate * dur);
         float[] samples = new float[count];
-
         for (int i = 0; i < count; i++)
         {
             float t = (float)i / count;
@@ -232,7 +241,6 @@ public class BowAndArrowSystem : MonoBehaviour
             float tension = Random.Range(-0.2f, 0.2f) * t * 0.3f;
             samples[i] = creak + tension;
         }
-
         AudioClip clip = AudioClip.Create("BowDraw_Procedural", count, 1, sampleRate, false);
         clip.SetData(samples, 0);
         return clip;
@@ -244,7 +252,6 @@ public class BowAndArrowSystem : MonoBehaviour
         float dur = 0.22f;
         int count = (int)(sampleRate * dur);
         float[] samples = new float[count];
-
         for (int i = 0; i < count; i++)
         {
             float t = (float)i / count;
@@ -252,7 +259,6 @@ public class BowAndArrowSystem : MonoBehaviour
             float whoosh = Random.Range(-0.4f, 0.4f) * Mathf.Exp(-12f * t) * 0.4f;
             samples[i] = snap + whoosh;
         }
-
         AudioClip clip = AudioClip.Create("BowRelease_Procedural", count, 1, sampleRate, false);
         clip.SetData(samples, 0);
         return clip;
@@ -264,13 +270,11 @@ public class BowAndArrowSystem : MonoBehaviour
         float dur = 0.12f;
         int count = (int)(sampleRate * dur);
         float[] samples = new float[count];
-
         for (int i = 0; i < count; i++)
         {
             float t = (float)i / count;
             samples[i] = Random.Range(-0.3f, 0.3f) * Mathf.Exp(-28f * t);
         }
-
         AudioClip clip = AudioClip.Create("BowDryFire_Procedural", count, 1, sampleRate, false);
         clip.SetData(samples, 0);
         return clip;

@@ -2,7 +2,7 @@
 
 /// <summary>
 /// CelticSlingSystem: Funda Celta artesanal de couro para arremesso de seixos e pedras de rio.
-/// Arma de longo alcance econômica e silenciosa para caça e combate na Galícia ancestral.
+/// Arma de longo alcance economica e silenciosa para caca e combate na Galicia ancestral.
 /// </summary>
 public class CelticSlingSystem : MonoBehaviour
 {
@@ -49,8 +49,8 @@ public class CelticSlingSystem : MonoBehaviour
     {
         if (inventory != null && !inventory.HasItem(101)) // 101 = Pedra
         {
-            HUDSurvivalOverlay hud = FindAnyObjectByType<HUDSurvivalOverlay>();
-            if (hud != null) hud.ShowLootTooltip("Sem pedras para a funda! (Coletar Pedra ID 101)");
+            if (HUDSurvivalOverlay.Instance != null)
+                HUDSurvivalOverlay.Instance.ShowLootTooltip("Sem pedras para a funda! (Coletar Pedra)");
             return;
         }
 
@@ -73,7 +73,6 @@ public class CelticSlingSystem : MonoBehaviour
             windupTimer += Time.deltaTime;
             if (audioSource != null && audioSource.isPlaying)
             {
-                // Aumenta o tom e intensidade conforme gira mais rápido
                 audioSource.pitch = Mathf.Lerp(0.85f, 1.45f, windupTimer / maxWindupTime);
             }
         }
@@ -121,6 +120,7 @@ public class CelticSlingSystem : MonoBehaviour
 
         SlingStoneProjectile proj = stoneObj.AddComponent<SlingStoneProjectile>();
         proj.damage = Mathf.RoundToInt(bluntDamage * Mathf.Lerp(0.6f, 1.25f, chargeRatio));
+        proj.shooterRoot = transform;
 
         if (FirstPersonCamera.Instance != null)
         {
@@ -128,7 +128,7 @@ public class CelticSlingSystem : MonoBehaviour
         }
     }
 
-    // =================== SÍNTESE PROCEDURAL DE ÁUDIO ===================
+    // =================== SINTESE PROCEDURAL DE AUDIO ===================
 
     private AudioClip GenerateSlingWindupSound()
     {
@@ -172,18 +172,80 @@ public class CelticSlingSystem : MonoBehaviour
 public class SlingStoneProjectile : MonoBehaviour
 {
     public int damage = 30;
+    public Transform shooterRoot;
     private bool hasCollided = false;
+    private Rigidbody rb;
+
+    private void Awake()
+    {
+        rb = GetComponent<Rigidbody>();
+    }
+
+    private void FixedUpdate()
+    {
+        if (hasCollided || rb == null || rb.linearVelocity.sqrMagnitude < 1f) return;
+
+        Vector3 vel = rb.linearVelocity;
+        float stepDist = vel.magnitude * Time.fixedDeltaTime * 1.4f;
+        Ray sweepRay = new Ray(transform.position, vel.normalized);
+
+        if (VultoManager.Instance != null &&
+            VultoManager.Instance.TryDamageVultoInRay(sweepRay, stepDist, 0.42f, damage, sweepRay.direction, out Vector3 vHit, out bool vKilled))
+        {
+            hasCollided = true;
+            if (VFXPoolManager.Instance != null) VFXPoolManager.Instance.PlayShadowHitVFX(vHit);
+            if (HUDSurvivalOverlay.Instance != null) HUDSurvivalOverlay.Instance.TriggerHitMarker(false, vKilled);
+            rb.linearVelocity *= 0.25f;
+            Destroy(gameObject, 5f);
+            return;
+        }
+
+        if (FaunaManager.Instance != null &&
+            FaunaManager.Instance.TryDamageFaunaInRay(sweepRay, stepDist, 0.36f, damage, out Vector3 fHit, out bool fKilled))
+        {
+            hasCollided = true;
+            if (VFXPoolManager.Instance != null) VFXPoolManager.Instance.PlayBloodSplashVFX(fHit, -sweepRay.direction);
+            if (HUDSurvivalOverlay.Instance != null) HUDSurvivalOverlay.Instance.TriggerHitMarker(false, fKilled);
+            rb.linearVelocity *= 0.25f;
+            Destroy(gameObject, 5f);
+        }
+    }
 
     private void OnCollisionEnter(Collision collision)
     {
         if (hasCollided) return;
+        if (collision.collider != null && shooterRoot != null &&
+            (collision.collider.transform == shooterRoot || collision.collider.transform.IsChildOf(shooterRoot)))
+        {
+            return;
+        }
+
         hasCollided = true;
+        Vector3 point = collision.contacts.Length > 0 ? collision.contacts[0].point : transform.position;
+        Vector3 normal = collision.contacts.Length > 0 ? collision.contacts[0].normal : Vector3.up;
+
+        bool hitShadow = VultoManager.Instance != null && VultoManager.Instance.TryDamageVultoAt(point, damage);
+        bool faunaKilled = false;
+        bool hitFauna = !hitShadow && FaunaManager.Instance != null && FaunaManager.Instance.TryDamageFaunaAt(point, damage, out faunaKilled);
 
         if (collision.collider != null)
         {
             collision.collider.SendMessageUpwards("TakeDamage", damage, SendMessageOptions.DontRequireReceiver);
         }
 
-        Destroy(gameObject, 15f);
+        if (hitShadow || hitFauna)
+        {
+            if (HUDSurvivalOverlay.Instance != null)
+                HUDSurvivalOverlay.Instance.TriggerHitMarker(false, faunaKilled);
+        }
+
+        if (VFXPoolManager.Instance != null)
+        {
+            if (hitShadow) VFXPoolManager.Instance.PlayShadowHitVFX(point);
+            else if (hitFauna) VFXPoolManager.Instance.PlayBloodSplashVFX(point, normal);
+            else VFXPoolManager.Instance.PlaySparkVFX(point, normal);
+        }
+
+        Destroy(gameObject, 12f);
     }
 }

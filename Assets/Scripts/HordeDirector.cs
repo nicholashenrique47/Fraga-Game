@@ -18,6 +18,7 @@ public class HordeDirector : MonoBehaviour
     public SanitySystem playerSanity;
 
     private bool isHordeActive = false;
+    private float hordeCooldownTimer = 0f;
 
     private void Update()
     {
@@ -27,6 +28,13 @@ public class HordeDirector : MonoBehaviour
 
         if (isNight)
         {
+            if (isHordeActive)
+            {
+                hordeCooldownTimer -= Time.deltaTime;
+                if (hordeCooldownTimer <= 0f) isHordeActive = false;
+                return;
+            }
+
             float sanityMod = (playerSanity != null && playerSanity.sanity < 40f) ? 1.5f : 1f;
             baseTension += tensionBuildRate * sanityMod * Time.deltaTime;
 
@@ -39,14 +47,21 @@ public class HordeDirector : MonoBehaviour
         {
             baseTension = 0f;
             isHordeActive = false;
+            hordeCooldownTimer = 0f;
         }
     }
 
     private void TriggerHorde()
     {
         isHordeActive = true;
+        hordeCooldownTimer = 95f;
         baseTension = 0f;
         Debug.Log("[HordeDirector] Tensão máxima da noite! Pequeno grupo de Vultos avistado nas sombras.");
+
+        if (HUDSurvivalOverlay.Instance != null)
+            HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#FF6655>Cerco noturno! Vultos rondam seu acampamento. Defenda com fogo e palicadas!</color>");
+        if (AudioManager.Instance != null)
+            AudioManager.Instance.PlayHorrorSting();
 
         if (playerSanity != null)
         {

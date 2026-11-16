@@ -87,15 +87,23 @@ public class BiomeManager : MonoBehaviour
     
     public BiomeType GetBiomeAt(int x, int z)
     {
-        // Dividir o mapa em quadrantes
-        int quadX = x / biomeGridSize;
-        int quadZ = z / biomeGridSize;
-        
-        // Hash simples para bioma deterministico
-        int hash = (quadX * 7 + quadZ * 13) % 4;
-        if (hash < 0) hash += 4;
-        
-        return (BiomeType)hash;
+        FragaWorldBlueprint.WorldRegion reg = FragaWorldBlueprint.GetRegion(x, z);
+        switch (reg)
+        {
+            case FragaWorldBlueprint.WorldRegion.SwampBasin:
+                return BiomeType.Swamp;
+            case FragaWorldBlueprint.WorldRegion.CelticCastro:
+            case FragaWorldBlueprint.WorldRegion.SacredCave:
+            case FragaWorldBlueprint.WorldRegion.FarolBluff:
+                return BiomeType.Ruins;
+            case FragaWorldBlueprint.WorldRegion.CrashCamp:
+            case FragaWorldBlueprint.WorldRegion.AtlanticCoast:
+            case FragaWorldBlueprint.WorldRegion.HighlandLake:
+            case FragaWorldBlueprint.WorldRegion.MountainSummit:
+                return BiomeType.Meadow;
+            default:
+                return BiomeType.DarkForest;
+        }
     }
     
     public float GetTemperatureModifier()
@@ -115,15 +123,11 @@ public class BiomeManager : MonoBehaviour
         UIManager ui = FindAnyObjectByType<UIManager>();
         if (ui != null)
         {
-            string biomeName = newBiome switch
+            if (playerTransform != null)
             {
-                BiomeType.DarkForest => "Floresta Sombria",
-                BiomeType.Meadow => "Prado Aberto",
-                BiomeType.Swamp => "Pantano Tóxico",
-                BiomeType.Ruins => "Ruínas Ancestrais",
-                _ => "Desconhecido"
-            };
-            ui.SetLootTooltip($"Bioma: {biomeName}");
+                var reg = FragaWorldBlueprint.GetRegion(playerTransform.position.x, playerTransform.position.z);
+                ui.SetLootTooltip($"Região: {FragaWorldBlueprint.GetRegionDisplayName(reg)}");
+            }
         }
     }
 }

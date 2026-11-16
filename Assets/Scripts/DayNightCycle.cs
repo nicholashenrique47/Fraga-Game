@@ -74,8 +74,8 @@ public class DayNightCycle : MonoBehaviour
         RenderSettings.ambientMode = AmbientMode.Trilight;
         RenderSettings.fog = true;
         RenderSettings.fogMode = FogMode.Linear;
-        RenderSettings.fogStartDistance = 40f;
-        RenderSettings.fogEndDistance = 280f;
+        RenderSettings.fogStartDistance = Application.isMobilePlatform ? 65f : 90f;
+        RenderSettings.fogEndDistance = Application.isMobilePlatform ? 390f : 580f;
 
         nextWeatherChangeTime = currentTime + Random.Range(3f, 7f);
         CreateRainSystem();
@@ -88,7 +88,7 @@ public class DayNightCycle : MonoBehaviour
     /// </summary>
     private void ConsolidateDirectionalLight()
     {
-        Light[] allLights = FindObjectsByType<Light>(FindObjectsSortMode.None);
+        Light[] allLights = FindObjectsByType<Light>();
         Light bestLight = directionalLight;
 
         foreach (var l in allLights)
@@ -198,8 +198,15 @@ public class DayNightCycle : MonoBehaviour
         {
             if (santaCompanaSystem != null)
             {
-                Vector3 start = new Vector3(Random.Range(15f, 85f), 0f, 95f);
-                Vector3 end = new Vector3(Random.Range(15f, 85f), 0f, 5f);
+                GameManager gm = FindAnyObjectByType<GameManager>();
+                float mw = gm != null ? gm.mapWidth : FragaWorldBlueprint.DefaultWidth;
+                float mh = gm != null ? gm.mapHeight : FragaWorldBlueprint.DefaultHeight;
+                float sx = Random.Range(15f, Mathf.Max(20f, mw - 15f));
+                float sz = Mathf.Max(25f, mh - 10f);
+                float ex = Random.Range(15f, Mathf.Max(20f, mw - 15f));
+                float ez = 10f;
+                Vector3 start = new Vector3(sx, TerrainMeshGenerator.GetTerrainHeight(sx, sz), sz);
+                Vector3 end = new Vector3(ex, TerrainMeshGenerator.GetTerrainHeight(ex, ez), ez);
                 santaCompanaSystem.TriggerEvent(start, end);
                 santaCompanaTriggered = true;
             }
@@ -222,8 +229,8 @@ public class DayNightCycle : MonoBehaviour
         RenderSettings.ambientMode = AmbientMode.Trilight;
         RenderSettings.fog = true;
         RenderSettings.fogMode = FogMode.Linear;
-        RenderSettings.fogStartDistance = 40f;
-        RenderSettings.fogEndDistance = 280f;
+        RenderSettings.fogStartDistance = Application.isMobilePlatform ? 65f : 90f;
+        RenderSettings.fogEndDistance = Application.isMobilePlatform ? 390f : 580f;
 
         // =========================================================================
         // TRANSIÇÃO ORGÂNICA CONTÍNUA (SEM CORTES OU PULOS EM SEGUNDOS)

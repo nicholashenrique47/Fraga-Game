@@ -1,12 +1,8 @@
 using UnityEngine;
 
 /// <summary>
-/// SanitySystem: Governa a sanidade mental, combustível do lampião e proteção contra as trevas galegas.
-/// Calibrado para sobrevivência imersiva e justa:
-/// - A escuridão drena sanidade gradualmente (nunca morte instantânea súbita).
-/// - Sanidade baixa causa advertências visuais e delírios sem travar o jogo.
-/// - Quando a sanidade chega a 0, entra em estado de agonia drenando vida aos poucos,
-///   concedendo tempo real para o jogador acender uma fogueira ou tocha.
+/// SanitySystem: Governa a sanidade mental, combustivel do lampiao e protecao contra as trevas galegas.
+/// Unifica deteccao de fogueiras fisicas (BonfireEntity) e grid nativo, sincronizando PlayerStatus.isNearBonfire.
 /// </summary>
 public class SanitySystem : MonoBehaviour
 {
@@ -15,12 +11,12 @@ public class SanitySystem : MonoBehaviour
     [Range(0f, 100f)] public float oil = 100f;
 
     [Header("Depletion Rates (Calibrado The Forest AAA)")]
-    public float oilDepletionRate = 0.035f;        // ~48 minutos de lampião contínuo
-    public float sanityDepletionRateDark = 0.18f;  // ~9.5 minutos na escuridão plena antes de esgotar
-    public float sanityRecoveryRateLight = 1.6f;   // Recuperação satisfatória sob o sol ou fogueira
+    public float oilDepletionRate = 0.035f;
+    public float sanityDepletionRateDark = 0.18f;
+    public float sanityRecoveryRateLight = 1.6f;
 
     [Header("Light Component")]
-    public Light lampLight; // Componente Light do Unity URP
+    public Light lampLight;
     public float maxLightRange = 18f;
     public float maxLightIntensity = 2.8f;
     public float minOilThresholdForLight = 1f;
@@ -33,6 +29,12 @@ public class SanitySystem : MonoBehaviour
     private bool isDepleted = false;
     private float zeroSanityTimer = 0f;
     private PlayerStatus playerStatusCache;
+    private GameManager gameManagerCache;
+    private PostProcessingManager ppManagerCache;
+    private InventoryAdvanced inventoryCache;
+    private float nextBonfireCheckTime = 0f;
+    private BonfireEntity[] bonfireCache;
+    private float nextBonfireCacheTime = 0f;
 
     private void Awake()
     {
@@ -42,32 +44,20 @@ public class SanitySystem : MonoBehaviour
         isDepleted = false;
         zeroSanityTimer = 0f;
         playerStatusCache = GetComponent<PlayerStatus>();
-        if (dayNightCycle == null)
-        {
-            dayNightCycle = FindAnyObjectByType<DayNightCycle>();
-        }
+        if (dayNightCycle == null) dayNightCycle = FindAnyObjectByType<DayNightCycle>();
     }
 
     private void Start()
     {
-        if (dayNightCycle == null)
-        {
-            dayNightCycle = FindAnyObjectByType<DayNightCycle>();
-        }
-        if (playerStatusCache == null)
-        {
-            playerStatusCache = GetComponent<PlayerStatus>();
-        }
+        if (dayNightCycle == null) dayNightCycle = FindAnyObjectByType<DayNightCycle>();
+        if (playerStatusCache == null) playerStatusCache = GetComponent<PlayerStatus>();
+        gameManagerCache = FindAnyObjectByType<GameManager>();
+        ppManagerCache = FindAnyObjectByType<PostProcessingManager>();
+        inventoryCache = InventoryAdvanced.Instance ?? FindAnyObjectByType<InventoryAdvanced>();
     }
 
     private void Update()
     {
-        // Toggle do lampião no PC pela tecla F
-        if (Input.GetKeyDown(KeyCode.F))
-        {
-            ToggleLamp();
-        }
-
         UpdateOil();
         UpdateLight();
         UpdateSanity();
@@ -102,17 +92,20 @@ public class SanitySystem : MonoBehaviour
 
     private void UpdateSanity()
     {
-        CheckBonfireProximity();
-
-        // 1. Verifica se é dia (entre 06:00 e 19:30)
-        if (dayNightCycle == null)
+        if (Time.time >= nextBonfireCheckTime)
         {
-            dayNightCycle = FindAnyObjectByType<DayNightCycle>();
+            nextBonfireCheckTime = Time.time + 0.35f;
+            CheckBonfireProximity();
         }
-        bool isDaytime = (dayNightCycle != null) ? (dayNightCycle.currentTime >= 6f && dayNightCycle.currentTime < 19.5f) : true;
 
-        // 2. Verifica se o jogador está iluminado (Dia, Lampião aceso com óleo ou perto de fogueira)
-        bool hasLantern = (lampLight != null && lampLight.enabled && isLampOn && oil > minOilThresholdForLight);
+        if (isNearBonfire)
+        {
+            sanity += (sanityRecoveryRateLight * 2.0f) * Time.deltaTime;
+        }
+
+        bool isDaytime = (dayNightCycle != null) ? (dayNightCycle.currentTime >= 6f && dayNightCycle.currentTime < 19.5f) : true;
+        bool hasOffHandLight = inventoryCache != null && (inventoryCache.equippedOffHandId == 303 || inventoryCache.equippedOffHandId == 304);
+        bool hasLantern = (lampLight != null && lampLight.enabled && isLampOn && oil > minOilThresholdForLight) || hasOffHandLight;
         bool isInLight = isDaytime || hasLantern || isNearBonfire;
 
         if (isInLight)
@@ -126,18 +119,14 @@ public class SanitySystem : MonoBehaviour
         }
         sanity = Mathf.Clamp(sanity, 0f, 100f);
 
-        // 3. Estado de Agonia / Delírio quando a sanidade zera
         if (sanity <= 0f)
         {
             zeroSanityTimer += Time.deltaTime;
-
-            // Dano gradual na vida em vez de morte súbita instantânea
             if (playerStatusCache != null)
             {
                 playerStatusCache.TakeDamagePassive(2.5f * Time.deltaTime);
             }
 
-            // Apenas aciona a sequência de colapso mental se ficar mais de 35s ininterruptos em sanidade zero sem luz
             if (zeroSanityTimer > 35f && !isDepleted)
             {
                 isDepleted = true;
@@ -160,7 +149,6 @@ public class SanitySystem : MonoBehaviour
         }
         else if (!isLampOn)
         {
-            // Recuperação lenta natural de gordura/óleo durante o dia enquanto o lampião repousa
             if (dayNightCycle != null && !dayNightCycle.IsNight() && oil < 40f)
             {
                 oil += 0.01f * Time.deltaTime;
@@ -172,7 +160,6 @@ public class SanitySystem : MonoBehaviour
     {
         if (lampLight == null) return;
 
-        // Se o óleo acabar, apaga o lampião
         if (oil < minOilThresholdForLight)
         {
             isLampOn = false;
@@ -181,8 +168,6 @@ public class SanitySystem : MonoBehaviour
         }
 
         lampLight.enabled = isLampOn;
-
-        // Normalizar valor do óleo de 0.0 a 1.0 para mapeamento suave
         float oilNormalized = oil / 100f;
         lampLight.range = Mathf.Lerp(8f, maxLightRange, oilNormalized);
         lampLight.intensity = Mathf.Lerp(1.2f, maxLightIntensity, oilNormalized);
@@ -191,25 +176,56 @@ public class SanitySystem : MonoBehaviour
     private void CheckBonfireProximity()
     {
         isNearBonfire = false;
-        GameManager gm = FindAnyObjectByType<GameManager>();
-        if (gm == null || gm.mapDataPtr == System.IntPtr.Zero) return;
 
-        int pX = Mathf.RoundToInt(transform.position.x);
-        int pY = Mathf.RoundToInt(transform.position.z);
-
-        // Raio de 3 tiles em volta do jogador
-        for (int y = pY - 3; y <= pY + 3; y++)
+        if (Time.time >= nextBonfireCacheTime)
         {
-            for (int x = pX - 3; x <= pX + 3; x++)
+            nextBonfireCacheTime = Time.time + 1.5f;
+            bonfireCache = FindObjectsByType<BonfireEntity>();
+        }
+
+        if (bonfireCache != null)
+        {
+            Vector3 pPos = transform.position;
+            for (int i = 0; i < bonfireCache.Length; i++)
             {
-                int tileID = ResourceManager.GetMapCell(gm.mapDataPtr, gm.mapWidth, gm.mapHeight, x, y);
-                if (tileID == 4) // Fogueira encontrada nas redondezas
+                BonfireEntity bf = bonfireCache[i];
+                if (bf != null && bf.isLit && (bf.transform.position - pPos).sqrMagnitude <= 25f)
                 {
                     isNearBonfire = true;
-                    sanity += (sanityRecoveryRateLight * 2.0f) * Time.deltaTime;
-                    return;
+                    break;
                 }
             }
+        }
+
+        if (!isNearBonfire)
+        {
+            if (gameManagerCache == null) gameManagerCache = FindAnyObjectByType<GameManager>();
+            if (gameManagerCache != null && gameManagerCache.mapDataPtr != System.IntPtr.Zero)
+            {
+                int pX = Mathf.RoundToInt(transform.position.x);
+                int pY = Mathf.RoundToInt(transform.position.z);
+
+                for (int y = pY - 3; y <= pY + 3 && !isNearBonfire; y++)
+                {
+                    for (int x = pX - 3; x <= pX + 3; x++)
+                    {
+                        if (x >= 0 && x < gameManagerCache.mapWidth && y >= 0 && y < gameManagerCache.mapHeight)
+                        {
+                            int tileID = ResourceManager.GetMapCell(gameManagerCache.mapDataPtr, gameManagerCache.mapWidth, gameManagerCache.mapHeight, x, y);
+                            if (tileID == 4)
+                            {
+                                isNearBonfire = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (playerStatusCache != null)
+        {
+            playerStatusCache.isNearBonfire = isNearBonfire;
         }
     }
 
@@ -220,6 +236,10 @@ public class SanitySystem : MonoBehaviour
         {
             radius = lampLight.range;
         }
+        if (inventoryCache != null && (inventoryCache.equippedOffHandId == 303 || inventoryCache.equippedOffHandId == 304))
+        {
+            radius = Mathf.Max(radius, 12f);
+        }
         if (isNearBonfire)
         {
             radius = Mathf.Max(radius, 10f);
@@ -229,17 +249,13 @@ public class SanitySystem : MonoBehaviour
 
     private void HandleSanityDepleted()
     {
-        Debug.Log("[SanitySystem] Sanidade esgotada após agonia prolongada. O jogador sucumbiu à escuridão da Fraga.");
-        
-        PostProcessingManager ppManager = FindAnyObjectByType<PostProcessingManager>();
-        if (ppManager != null)
+        if (ppManagerCache != null)
         {
-            ppManager.StartDeathSequence();
+            ppManagerCache.StartDeathSequence();
         }
-        else
+        else if (gameManagerCache != null)
         {
-            GameManager gm = FindAnyObjectByType<GameManager>();
-            if (gm != null) gm.TriggerGameOver();
+            gameManagerCache.TriggerGameOver();
         }
 
         if (VFXPoolManager.Instance != null)

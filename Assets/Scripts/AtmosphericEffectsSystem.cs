@@ -32,6 +32,7 @@ public class AtmosphericEffectsSystem : MonoBehaviour
     private bool isNight;
     private bool isDawn;
     private float currentTime;
+    private Texture2D softGlowFallback;
 
     private void Start()
     {
@@ -54,8 +55,8 @@ public class AtmosphericEffectsSystem : MonoBehaviour
         main.loop = true;
         main.startLifetime = new ParticleSystem.MinMaxCurve(6f, 12f);
         main.startSpeed = new ParticleSystem.MinMaxCurve(0.02f, 0.08f);
-        main.startSize = new ParticleSystem.MinMaxCurve(0.02f, 0.06f);
-        main.startColor = new Color(1f, 0.95f, 0.8f, 0.3f);
+        main.startSize = new ParticleSystem.MinMaxCurve(0.025f, 0.065f);
+        main.startColor = new Color(1f, 0.95f, 0.8f, 0.35f);
         main.maxParticles = maxDustMotes;
         main.simulationSpace = ParticleSystemSimulationSpace.World;
         main.gravityModifier = -0.01f; // Levemente flutuante para cima
@@ -82,14 +83,14 @@ public class AtmosphericEffectsSystem : MonoBehaviour
             new GradientColorKey[] { new GradientColorKey(new Color(1f, 0.95f, 0.8f), 0f) },
             new GradientAlphaKey[] {
                 new GradientAlphaKey(0f, 0f),
-                new GradientAlphaKey(0.25f, 0.2f),
-                new GradientAlphaKey(0.25f, 0.8f),
+                new GradientAlphaKey(0.28f, 0.2f),
+                new GradientAlphaKey(0.28f, 0.8f),
                 new GradientAlphaKey(0f, 1f)
             }
         );
         colorOverLifetime.color = g;
 
-        SetupParticleRenderer(dustParticles, new Color(1f, 0.95f, 0.8f, 0.3f));
+        SetupParticleRenderer(dustParticles, new Color(1f, 0.95f, 0.8f, 0.35f), isMist: false, additive: false);
         dustParticles.Stop();
     }
 
@@ -105,8 +106,8 @@ public class AtmosphericEffectsSystem : MonoBehaviour
         main.loop = true;
         main.startLifetime = new ParticleSystem.MinMaxCurve(4f, 8f);
         main.startSpeed = new ParticleSystem.MinMaxCurve(0.1f, 0.4f);
-        main.startSize = new ParticleSystem.MinMaxCurve(0.04f, 0.1f);
-        main.startColor = new Color(0.8f, 1f, 0.3f, 0.8f); // Verde-amarelo bioluminescente
+        main.startSize = new ParticleSystem.MinMaxCurve(0.06f, 0.14f);
+        main.startColor = new Color(0.8f, 1f, 0.3f, 0.85f); // Verde-amarelo bioluminescente
         main.maxParticles = maxFireflies;
         main.simulationSpace = ParticleSystemSimulationSpace.World;
 
@@ -145,7 +146,7 @@ public class AtmosphericEffectsSystem : MonoBehaviour
         );
         colorOverLifetime.color = g;
 
-        SetupParticleRenderer(fireflyParticles, new Color(0.8f, 1f, 0.3f, 0.9f));
+        SetupParticleRenderer(fireflyParticles, new Color(0.8f, 1f, 0.3f, 0.9f), isMist: false, additive: true);
         fireflyParticles.Stop();
     }
 
@@ -161,8 +162,8 @@ public class AtmosphericEffectsSystem : MonoBehaviour
         main.loop = true;
         main.startLifetime = new ParticleSystem.MinMaxCurve(8f, 15f);
         main.startSpeed = new ParticleSystem.MinMaxCurve(0.05f, 0.2f);
-        main.startSize = new ParticleSystem.MinMaxCurve(2f, 5f);
-        main.startColor = new Color(0.7f, 0.75f, 0.8f, 0.08f); // Muito sutil
+        main.startSize = new ParticleSystem.MinMaxCurve(2.5f, 5.5f);
+        main.startColor = new Color(0.7f, 0.75f, 0.8f, 0.12f); // Névoa macia
         main.maxParticles = maxFogParticles;
         main.simulationSpace = ParticleSystemSimulationSpace.World;
         main.gravityModifier = -0.005f; // Sobe lentamente
@@ -187,14 +188,14 @@ public class AtmosphericEffectsSystem : MonoBehaviour
             new GradientColorKey[] { new GradientColorKey(new Color(0.7f, 0.75f, 0.8f), 0f) },
             new GradientAlphaKey[] {
                 new GradientAlphaKey(0f, 0f),
-                new GradientAlphaKey(0.06f, 0.3f),
-                new GradientAlphaKey(0.06f, 0.7f),
+                new GradientAlphaKey(0.08f, 0.3f),
+                new GradientAlphaKey(0.08f, 0.7f),
                 new GradientAlphaKey(0f, 1f)
             }
         );
         colorOverLifetime.color = g;
 
-        SetupParticleRenderer(groundFogParticles, new Color(0.7f, 0.75f, 0.8f, 0.1f));
+        SetupParticleRenderer(groundFogParticles, new Color(0.7f, 0.75f, 0.8f, 0.14f), isMist: true, additive: false);
         groundFogParticles.Stop();
     }
 
@@ -210,10 +211,10 @@ public class AtmosphericEffectsSystem : MonoBehaviour
         main.loop = true;
         main.startLifetime = new ParticleSystem.MinMaxCurve(5f, 10f);
         main.startSpeed = new ParticleSystem.MinMaxCurve(0.3f, 1f);
-        main.startSize = new ParticleSystem.MinMaxCurve(0.08f, 0.15f);
+        main.startSize = new ParticleSystem.MinMaxCurve(0.09f, 0.16f);
         main.startColor = new ParticleSystem.MinMaxGradient(
-            new Color(0.4f, 0.25f, 0.1f, 0.8f),   // Folha seca castanha
-            new Color(0.15f, 0.25f, 0.05f, 0.8f)   // Folha verde escura
+            new Color(0.4f, 0.25f, 0.1f, 0.85f),   // Folha seca castanha
+            new Color(0.15f, 0.25f, 0.05f, 0.85f)   // Folha verde escura
         );
         main.maxParticles = maxLeaves;
         main.simulationSpace = ParticleSystemSimulationSpace.World;
@@ -237,7 +238,7 @@ public class AtmosphericEffectsSystem : MonoBehaviour
         noise.strength = 0.5f;
         noise.frequency = 0.8f;
 
-        SetupParticleRenderer(leavesParticles, new Color(0.3f, 0.2f, 0.1f, 0.8f));
+        SetupParticleRenderer(leavesParticles, new Color(0.35f, 0.24f, 0.12f, 0.85f), isMist: true, additive: false);
         leavesParticles.Play();
     }
 
@@ -253,7 +254,7 @@ public class AtmosphericEffectsSystem : MonoBehaviour
         main.loop = true;
         main.startLifetime = new ParticleSystem.MinMaxCurve(2f, 4f);
         main.startSpeed = new ParticleSystem.MinMaxCurve(0.5f, 2f);
-        main.startSize = new ParticleSystem.MinMaxCurve(0.02f, 0.05f);
+        main.startSize = new ParticleSystem.MinMaxCurve(0.03f, 0.07f);
         main.startColor = new ParticleSystem.MinMaxGradient(
             new Color(1f, 0.3f, 0f, 0.9f),    // Laranja
             new Color(1f, 0.7f, 0.1f, 0.9f)    // Amarelo
@@ -293,22 +294,60 @@ public class AtmosphericEffectsSystem : MonoBehaviour
         );
         colorOverLifetime.color = g;
 
-        SetupParticleRenderer(embersParticles, new Color(1f, 0.5f, 0.1f, 0.9f));
+        SetupParticleRenderer(embersParticles, new Color(1f, 0.5f, 0.1f, 0.95f), isMist: false, additive: true);
         embersParticles.Stop();
     }
 
     // =================== RENDERER HELPER ===================
-    private void SetupParticleRenderer(ParticleSystem ps, Color tint)
+    private Texture2D GetParticleTexture(bool isMist)
+    {
+        string resName = isMist ? "Textures/soft_mist_puff" : "Textures/soft_particle_glow";
+        Texture2D tex = Resources.Load<Texture2D>(resName);
+        if (tex != null) return tex;
+
+        if (softGlowFallback == null)
+        {
+            const int size = 64;
+            softGlowFallback = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            softGlowFallback.wrapMode = TextureWrapMode.Clamp;
+            Color[] px = new Color[size * size];
+            float half = (size - 1) * 0.5f;
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float dx = (x - half) / half;
+                    float dy = (y - half) / half;
+                    float d = Mathf.Clamp01(Mathf.Sqrt(dx * dx + dy * dy));
+                    float a = Mathf.Pow(1f - d, 2.0f);
+                    px[y * size + x] = new Color(1f, 1f, 1f, a);
+                }
+            }
+            softGlowFallback.SetPixels(px);
+            softGlowFallback.Apply();
+        }
+        return softGlowFallback;
+    }
+
+    private void SetupParticleRenderer(ParticleSystem ps, Color tint, bool isMist = false, bool additive = false)
     {
         var renderer = ps.GetComponent<ParticleSystemRenderer>();
         Material mat = new Material(Shader.Find("Universal Render Pipeline/Particles/Unlit"));
         if (mat.shader == null) mat = new Material(Shader.Find("Particles/Standard Unlit"));
 
+        Texture2D tex = GetParticleTexture(isMist);
+        mat.SetTexture("_BaseMap", tex);
+        mat.mainTexture = tex;
+        mat.SetColor("_BaseColor", tint);
         mat.color = tint;
-        // Ativar transparência
+
+        // Ativar transparência suave sem z-fight ou quadrados
         mat.SetFloat("_Surface", 1);
+        mat.SetInt("_ZWrite", 0);
         mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-        mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+        mat.SetInt("_DstBlend", (int)(additive
+            ? UnityEngine.Rendering.BlendMode.One
+            : UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha));
         mat.renderQueue = 3000;
 
         renderer.material = mat;

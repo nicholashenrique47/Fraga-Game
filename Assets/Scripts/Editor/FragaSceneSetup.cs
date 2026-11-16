@@ -39,6 +39,9 @@ public class FragaSceneSetup : EditorWindow
         }
         GameObject orchestrator = new GameObject("--- GAME ORCHESTRATOR ---");
         GameManager gm = orchestrator.AddComponent<GameManager>();
+        gm.mapWidth = FragaWorldBlueprint.DefaultWidth;
+        gm.mapHeight = FragaWorldBlueprint.DefaultHeight;
+        FragaWorldBlueprint.Initialize(gm.mapSeed, gm.mapWidth, gm.mapHeight);
         
         // Setup de componentes
         GameObject playerPrefab = Resources.Load<GameObject>("Prefabs/Player_Prefab");
@@ -49,8 +52,10 @@ public class FragaSceneSetup : EditorWindow
             player = GameObject.CreatePrimitive(PrimitiveType.Capsule);
         }
         player.name = "Iago (Topografo)";
-        float startY = TerrainMeshGenerator.GetTerrainHeight(50f, 50f) + 1.0f;
-        player.transform.position = new Vector3(50f, startY, 50f);
+        float centerX = FragaWorldBlueprint.CrashCampPos.x;
+        float centerZ = FragaWorldBlueprint.CrashCampPos.y;
+        float startY = TerrainMeshGenerator.GetTerrainHeight(centerX, centerZ) + 1.0f;
+        player.transform.position = new Vector3(centerX, startY, centerZ);
 
         // Remove colisores de membros que causavam forca de penetracao para o ceu
         foreach (var c in player.GetComponentsInChildren<Collider>())
@@ -93,8 +98,9 @@ public class FragaSceneSetup : EditorWindow
         RenderSettings.ambientGroundColor = new Color(0.32f, 0.35f, 0.28f);
         RenderSettings.fog = true;
         RenderSettings.fogColor = new Color(0.55f, 0.65f, 0.72f);
-        RenderSettings.fogMode = FogMode.Exponential;
-        RenderSettings.fogDensity = 0.0055f;
+        RenderSettings.fogMode = FogMode.Linear;
+        RenderSettings.fogStartDistance = 85f;
+        RenderSettings.fogEndDistance = 560f;
 
         GameObject sun = new GameObject("Sol_Direcional");
         sun.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
@@ -124,7 +130,7 @@ public class FragaSceneSetup : EditorWindow
         mainCam.orthographic = false;
         mainCam.fieldOfView = 65f;
         mainCam.nearClipPlane = 0.08f;
-        mainCam.farClipPlane = 350f;
+        mainCam.farClipPlane = 650f;
         mainCam.gameObject.name = "Camera_PrimeiraPessoa";
 
         // Posicionar na altura dos olhos do personagem (1.75m)
@@ -168,6 +174,9 @@ public class FragaSceneSetup : EditorWindow
         if(tempVultoPrefab != null) {
             vultoManager.vultoMesh = tempVultoPrefab.GetComponentInChildren<MeshFilter>().sharedMesh;
             vultoManager.vultoMaterial = tempVultoPrefab.GetComponentInChildren<Renderer>().sharedMaterial;
+            if (vultoManager.vultoMaterial != null) {
+                vultoManager.vultoMaterial.enableInstancing = true;
+            }
         } else {
             GameObject tempVulto = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             vultoManager.vultoMesh = tempVulto.GetComponent<MeshFilter>().sharedMesh;
@@ -183,10 +192,7 @@ public class FragaSceneSetup : EditorWindow
         SantaCompanaSystem santaCompana = orchestrator.AddComponent<SantaCompanaSystem>();
         santaCompana.playerTransform = player.transform;
         santaCompana.sanitySystem = sanity;
-        GameObject santaObj = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        santaObj.name = "A_Santa_Compana";
-        santaObj.SetActive(false);
-        santaCompana.processionTransform = santaObj.transform;
+        santaCompana.meigaPrefab = tempVultoPrefab;
 
         // 4.5 Setup do MapRenderer (AGORA COM PREFABS)
         MapRenderer mapRenderer = orchestrator.AddComponent<MapRenderer>();
@@ -212,6 +218,13 @@ public class FragaSceneSetup : EditorWindow
         mapRenderer.celticCrossPrefab = Resources.Load<GameObject>("Prefabs/CelticCross_Prefab");
         mapRenderer.ancientGravePrefab = Resources.Load<GameObject>("Prefabs/AncientGrave_Prefab");
         mapRenderer.farolCeltaPrefab = Resources.Load<GameObject>("Prefabs/FarolCelta_Prefab");
+        mapRenderer.crashCampShelterPrefab = Resources.Load<GameObject>("Prefabs/CrashCampShelter_Prefab");
+        mapRenderer.woodenDockBridgePrefab = Resources.Load<GameObject>("Prefabs/WoodenDockBridge_Prefab");
+        mapRenderer.swampTotemPrefab = Resources.Load<GameObject>("Prefabs/SwampTotem_Prefab");
+        mapRenderer.castroRoundhousePrefab = Resources.Load<GameObject>("Prefabs/CastroRoundhouse_Prefab");
+        mapRenderer.stoneCircleHengePrefab = Resources.Load<GameObject>("Prefabs/StoneCircleHenge_Prefab");
+        mapRenderer.caveArchGrottoPrefab = Resources.Load<GameObject>("Prefabs/CaveArchGrotto_Prefab");
+        mapRenderer.cliffBoulderPrefab = Resources.Load<GameObject>("Prefabs/CliffBoulder_Prefab");
         
         // Ruina (Usa Cubo como base caso nao tenha prefab)
         mapRenderer.ruinPrefab = Resources.Load<GameObject>("Prefabs/Ruin_Prefab");
@@ -270,12 +283,25 @@ public class FragaSceneSetup : EditorWindow
         sanityVisuals.sanitySystem = sanity;
         sanityVisuals.postProcessVolume = volume;
         
-        GameObject fakeVulto = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        sanityVisuals.fakeVultoMesh = fakeVulto.GetComponent<MeshFilter>().sharedMesh;
-        sanityVisuals.fakeVultoMaterial = new Material(GetShaderSafely("Fraga/VultoShadow_Instanced"));
-        sanityVisuals.fakeVultoMaterial.color = Color.red; // Setup de componentes
-        sanityVisuals.fakeVultoMaterial.enableInstancing = true;
-        Object.DestroyImmediate(fakeVulto);
+        if (tempVultoPrefab != null && tempVultoPrefab.GetComponentInChildren<MeshFilter>() != null)
+        {
+            sanityVisuals.fakeVultoMesh = tempVultoPrefab.GetComponentInChildren<MeshFilter>().sharedMesh;
+            Material vMat = Resources.Load<Material>("Materials/Mat_Vulto_Cloak")
+                ?? tempVultoPrefab.GetComponentInChildren<Renderer>()?.sharedMaterial;
+            sanityVisuals.fakeVultoMaterial = vMat != null
+                ? vMat
+                : new Material(GetShaderSafely("Fraga/VultoShadow_Instanced"));
+            sanityVisuals.fakeVultoMaterial.enableInstancing = true;
+        }
+        else
+        {
+            GameObject fakeVulto = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            sanityVisuals.fakeVultoMesh = fakeVulto.GetComponent<MeshFilter>().sharedMesh;
+            sanityVisuals.fakeVultoMaterial = new Material(GetShaderSafely("Fraga/VultoShadow_Instanced"));
+            sanityVisuals.fakeVultoMaterial.color = Color.red;
+            sanityVisuals.fakeVultoMaterial.enableInstancing = true;
+            Object.DestroyImmediate(fakeVulto);
+        }
 
         // 4.7 Setup do Clima e Shaders Especiais
         WeatherSystem weather = orchestrator.AddComponent<WeatherSystem>();
@@ -283,7 +309,7 @@ public class FragaSceneSetup : EditorWindow
         weather.audioManager = audioManager;
         weather.playerTransform = player.transform;
 
-        // Efeitos Atmosf?ricos estilo The Forest (Poeira, Vaga-lumes, N?voa da Madrugada e Folhas ao Vento)
+        // Efeitos Atmosfericos estilo The Forest (Poeira, Vaga-lumes, Nevoa da Madrugada e Folhas ao Vento)
         AtmosphericEffectsSystem atmos = orchestrator.AddComponent<AtmosphericEffectsSystem>();
         atmos.dayNightCycle = timeCycle;
         atmos.weatherSystem = weather;
@@ -294,17 +320,27 @@ public class FragaSceneSetup : EditorWindow
         grassSys.playerTransform = player.transform;
         grassSys.weatherSystem = weather;
 
-        // Vulto e Arvores agora sao baseados nos Prefabs, nao precisamos sobrescrever aqui
-        // Adicionar malha para Cavernas/Rochas (Agora no MapRenderer via Prefab)
-
         // 4.8 Setup da Santa Compana (Horde)
         GameObject hordeObj = new GameObject("Santa_Compana_Horde");
         hordeObj.SetActive(false); // Inicia desativado
-        // Opcional: Adicionar um sistema de particulas e AudioSource aqui para a procissao
         ParticleSystem hordePS = hordeObj.AddComponent<ParticleSystem>();
         var em = hordePS.emission; em.rateOverTime = 50f;
         var sh = hordePS.shape; sh.shapeType = ParticleSystemShapeType.Box; sh.scale = new Vector3(8f, 2f, 2f);
         var main = hordePS.main; main.startColor = new Color(0.2f, 1.0f, 0.3f, 0.8f); // Verde fantasma
+        var hordeRenderer = hordeObj.GetComponent<ParticleSystemRenderer>();
+        if (hordeRenderer != null)
+        {
+            Material hordeMat = new Material(GetShaderSafely("Universal Render Pipeline/Particles/Unlit"));
+            Texture2D glowTex = Resources.Load<Texture2D>("Textures/soft_particle_glow");
+            if (glowTex != null) { hordeMat.SetTexture("_BaseMap", glowTex); hordeMat.mainTexture = glowTex; }
+            hordeMat.SetColor("_BaseColor", new Color(0.25f, 1.0f, 0.35f, 0.75f));
+            hordeMat.SetFloat("_Surface", 1f);
+            hordeMat.SetInt("_ZWrite", 0);
+            hordeMat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            hordeMat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.One);
+            hordeMat.renderQueue = 3000;
+            hordeRenderer.material = hordeMat;
+        }
 
         santaCompana.processionTransform = hordeObj.transform;
         santaCompana.resourceManager = resManager;
@@ -317,6 +353,21 @@ public class FragaSceneSetup : EditorWindow
         TerrainMeshGenerator terrainGen = terrainObj.AddComponent<TerrainMeshGenerator>();
         mapRenderer.terrainGenerator = terrainGen;
 
+        GameObject waterObj = new GameObject("Fraga_Water_System");
+        waterObj.AddComponent<FragaWaterManager>();
+
+        SceneryLightingSystem sceneryLights = orchestrator.AddComponent<SceneryLightingSystem>();
+        sceneryLights.mapRenderer = mapRenderer;
+        sceneryLights.dayNightCycle = timeCycle;
+        sceneryLights.playerTransform = player.transform;
+
+        SurvivalMapSystem survivalMap = orchestrator.AddComponent<SurvivalMapSystem>();
+        survivalMap.playerTransform = player.transform;
+
+        orchestrator.AddComponent<GalicianOptimizationManager>();
+        var atmoDriver = orchestrator.AddComponent<GalicianAtmosphericLightingDriver>();
+        atmoDriver.directionalLight = sunLight;
+        
         // Setup de componentes
         GameObject canvasObj = new GameObject("UI_Mobile_Canvas");
         Canvas canvas = canvasObj.AddComponent<Canvas>();
@@ -390,7 +441,7 @@ public class FragaSceneSetup : EditorWindow
         deathRect.offsetMax = Vector2.zero;
         ppManager.deathOverlay = deathCG;
 
-        // Death Panel AAA (Painel Interativo de Morte e Ressurreição)
+        // Death Panel AAA (Painel Interativo de Morte e Ressurreicao)
         GameObject deathPanel = new GameObject("Death_Panel");
         deathPanel.transform.SetParent(canvasObj.transform, false);
         RectTransform dpRect = deathPanel.AddComponent<RectTransform>();
@@ -435,7 +486,7 @@ public class FragaSceneSetup : EditorWindow
         dsRect.anchoredPosition = new Vector2(0, 35);
         dsRect.sizeDelta = new Vector2(580, 45);
         UnityEngine.UI.Text dsText = deathSub.AddComponent<UnityEngine.UI.Text>();
-        dsText.text = "A escuridão consumiu tuas forças vitais.\nA luz da alvorada é a tua única esperança.";
+        dsText.text = "A escuridao consumiu tuas forcas vitais.\nA luz da alvorada e a tua unica esperanca.";
         dsText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
         dsText.fontSize = 17;
         dsText.alignment = TextAnchor.MiddleCenter;
@@ -457,7 +508,7 @@ public class FragaSceneSetup : EditorWindow
             if (gm != null) gm.RevivePlayer();
             if (uiManager != null) uiManager.HideDeathScreen();
         });
-        CreateButtonLabel(reviveBtnObj.transform, "☀ RENASCER NA ALVORADA", 16);
+        CreateButtonLabel(reviveBtnObj.transform, "RENASCER NA ALVORADA", 16);
 
         GameObject menuBtnObj = new GameObject("Btn_Death_Menu");
         menuBtnObj.transform.SetParent(deathModal.transform, false);
@@ -529,7 +580,7 @@ public class FragaSceneSetup : EditorWindow
             fauna.deerPrefab = tempDeer;
             tempDeer.SetActive(false);
             Material deerMat = new Material(GetShaderSafely("Universal Render Pipeline/Lit"));
-            Texture2D tex3 = Resources.Load<Texture2D>("Textures/wolf_fur");
+            Texture2D tex3 = Resources.Load<Texture2D>("Textures/deer_pelt") ?? Resources.Load<Texture2D>("Textures/wolf_fur");
             if (tex3 != null) deerMat.SetTexture("_BaseMap", tex3);
             deerMat.color = new Color(0.6f, 0.4f, 0.2f);
             tempDeer.GetComponent<MeshRenderer>().sharedMaterial = deerMat;
@@ -552,11 +603,35 @@ public class FragaSceneSetup : EditorWindow
         fauna.bearPrefab = Resources.Load<GameObject>("Prefabs/Bear_Prefab");
         fauna.boarPrefab = Resources.Load<GameObject>("Prefabs/Boar_Prefab");
         fauna.rabbitPrefab = Resources.Load<GameObject>("Prefabs/Rabbit_Prefab");
-        fauna.maxDeer = 12;
-        fauna.maxWolves = 6;
-        fauna.maxBears = 3;
-        fauna.maxBoars = 5;
-        fauna.maxRabbits = 14;
+        fauna.maxDeer = 22;
+        fauna.maxWolves = 10;
+        fauna.maxBears = 5;
+        fauna.maxBoars = 9;
+        fauna.maxRabbits = 20;
+
+        // 15.5 Aves e Bosses Noturnos
+        CrowSystem crowSys = orchestrator.AddComponent<CrowSystem>();
+        crowSys.playerTransform = player.transform;
+        crowSys.maxCrows = 12;
+
+        EagleSystem eagleSys = orchestrator.AddComponent<EagleSystem>();
+        eagleSys.faunaManager = fauna;
+        eagleSys.playerTransform = player.transform;
+        eagleSys.inventory = advInventory;
+        eagleSys.maxEagles = 4;
+
+        BossSystem bossSys = orchestrator.AddComponent<BossSystem>();
+        bossSys.playerTransform = player.transform;
+        bossSys.vultoManager = vultoManager;
+        bossSys.dayNightCycle = timeCycle;
+        bossSys.sanitySystem = sanity;
+        bossSys.audioManager = audioManager;
+
+        TrasnoBossManager trasnoSys = orchestrator.AddComponent<TrasnoBossManager>();
+        trasnoSys.eventSystem = entitySys;
+        trasnoSys.gameManager = gm;
+        trasnoSys.dayNightCycle = timeCycle;
+        trasnoSys.trasnoPrefab = Resources.Load<GameObject>("Prefabs/Stalker_Prefab") ?? tempVultoPrefab;
 
         // 16. Ambiente do Mundo (Ervas, Cogumelos, Bagas)
         WorldEnvironment worldEnv = orchestrator.AddComponent<WorldEnvironment>();
@@ -564,28 +639,79 @@ public class FragaSceneSetup : EditorWindow
         worldEnv.inventory = advInventory;
         worldEnv.dayNightCycle = timeCycle;
         worldEnv.playerStatus = playerStatusSys;
+        worldEnv.maxHerbs = 90;
+        worldEnv.maxMushrooms = 45;
+        worldEnv.maxBerries = 70;
 
-        // Meshes de itens do mundo (primitivos de placeholder)
-        GameObject tempHerb = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        worldEnv.herbMesh = tempHerb.GetComponent<MeshFilter>().sharedMesh;
-        worldEnv.herbMaterial = new Material(GetShaderSafely("Universal Render Pipeline/Lit"));
-        worldEnv.herbMaterial.color = new Color(0.2f, 0.7f, 0.2f); // Verde
-        worldEnv.herbMaterial.enableInstancing = true;
-        Object.DestroyImmediate(tempHerb);
+        // Meshes 3D esculpidos de itens do mundo (com fallback para primitivos)
+        GameObject herbPrefab = Resources.Load<GameObject>("Prefabs/Herb_Prefab");
+        if (herbPrefab != null && herbPrefab.GetComponentInChildren<MeshFilter>() != null)
+        {
+            worldEnv.herbMesh = herbPrefab.GetComponentInChildren<MeshFilter>().sharedMesh;
+            Renderer hr = herbPrefab.GetComponentInChildren<Renderer>();
+            if (hr != null)
+            {
+                worldEnv.herbMaterial = hr.sharedMaterial;
+                worldEnv.herbMaterials = hr.sharedMaterials;
+                if (worldEnv.herbMaterial != null) worldEnv.herbMaterial.enableInstancing = true;
+                if (worldEnv.herbMaterials != null) foreach (var m in worldEnv.herbMaterials) if (m != null) m.enableInstancing = true;
+            }
+        }
+        else
+        {
+            GameObject tempHerb = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            worldEnv.herbMesh = tempHerb.GetComponent<MeshFilter>().sharedMesh;
+            worldEnv.herbMaterial = new Material(GetShaderSafely("Universal Render Pipeline/Lit"));
+            worldEnv.herbMaterial.color = new Color(0.2f, 0.7f, 0.2f);
+            worldEnv.herbMaterial.enableInstancing = true;
+            Object.DestroyImmediate(tempHerb);
+        }
 
-        GameObject tempMush = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        worldEnv.mushroomMesh = tempMush.GetComponent<MeshFilter>().sharedMesh;
-        worldEnv.mushroomMaterial = new Material(GetShaderSafely("Universal Render Pipeline/Lit"));
-        worldEnv.mushroomMaterial.color = new Color(0.6f, 0.2f, 0.5f); // Roxo escuro
-        worldEnv.mushroomMaterial.enableInstancing = true;
-        Object.DestroyImmediate(tempMush);
+        GameObject mushPrefab = Resources.Load<GameObject>("Prefabs/Mushroom_Prefab");
+        if (mushPrefab != null && mushPrefab.GetComponentInChildren<MeshFilter>() != null)
+        {
+            worldEnv.mushroomMesh = mushPrefab.GetComponentInChildren<MeshFilter>().sharedMesh;
+            Renderer mr = mushPrefab.GetComponentInChildren<Renderer>();
+            if (mr != null)
+            {
+                worldEnv.mushroomMaterial = mr.sharedMaterial;
+                worldEnv.mushroomMaterials = mr.sharedMaterials;
+                if (worldEnv.mushroomMaterial != null) worldEnv.mushroomMaterial.enableInstancing = true;
+                if (worldEnv.mushroomMaterials != null) foreach (var m in worldEnv.mushroomMaterials) if (m != null) m.enableInstancing = true;
+            }
+        }
+        else
+        {
+            GameObject tempMush = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            worldEnv.mushroomMesh = tempMush.GetComponent<MeshFilter>().sharedMesh;
+            worldEnv.mushroomMaterial = new Material(GetShaderSafely("Universal Render Pipeline/Lit"));
+            worldEnv.mushroomMaterial.color = new Color(0.6f, 0.2f, 0.5f);
+            worldEnv.mushroomMaterial.enableInstancing = true;
+            Object.DestroyImmediate(tempMush);
+        }
 
-        GameObject tempBerry = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        worldEnv.berryMesh = tempBerry.GetComponent<MeshFilter>().sharedMesh;
-        worldEnv.berryMaterial = new Material(GetShaderSafely("Universal Render Pipeline/Lit"));
-        worldEnv.berryMaterial.color = new Color(0.8f, 0.1f, 0.2f); // Vermelho
-        worldEnv.berryMaterial.enableInstancing = true;
-        Object.DestroyImmediate(tempBerry);
+        GameObject berryPrefab = Resources.Load<GameObject>("Prefabs/Berry_Prefab");
+        if (berryPrefab != null && berryPrefab.GetComponentInChildren<MeshFilter>() != null)
+        {
+            worldEnv.berryMesh = berryPrefab.GetComponentInChildren<MeshFilter>().sharedMesh;
+            Renderer br = berryPrefab.GetComponentInChildren<Renderer>();
+            if (br != null)
+            {
+                worldEnv.berryMaterial = br.sharedMaterial;
+                worldEnv.berryMaterials = br.sharedMaterials;
+                if (worldEnv.berryMaterial != null) worldEnv.berryMaterial.enableInstancing = true;
+                if (worldEnv.berryMaterials != null) foreach (var m in worldEnv.berryMaterials) if (m != null) m.enableInstancing = true;
+            }
+        }
+        else
+        {
+            GameObject tempBerry = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            worldEnv.berryMesh = tempBerry.GetComponent<MeshFilter>().sharedMesh;
+            worldEnv.berryMaterial = new Material(GetShaderSafely("Universal Render Pipeline/Lit"));
+            worldEnv.berryMaterial.color = new Color(0.8f, 0.1f, 0.2f);
+            worldEnv.berryMaterial.enableInstancing = true;
+            Object.DestroyImmediate(tempBerry);
+        }
 
         Sprite circleSprite = CreateCircleSprite(100);
 
@@ -641,15 +767,14 @@ public class FragaSceneSetup : EditorWindow
         combatSys.playerController = pc;
         combatSys.inventory = advInventory;
 
-        // Interface de Inventário e Crafting (Mochila de Sobrevivência)
+        // Interface de Inventario e Crafting (Mochila de Sobrevivencia)
         SurvivalInventoryCraftUI craftUI = canvasObj.AddComponent<SurvivalInventoryCraftUI>();
         craftUI.inventory = advInventory;
         craftUI.craftingSystem = crafting;
         craftUI.playerStatus = playerStatusSys;
         craftUI.cameraTouchZone = touchCtrl;
 
-        // --- CLUSTER DE BOTÕES DE AÇÃO MOBILE (The Forest AAA Layout) ---
-        // 1. Botão de Golpe / Corte de Madeira (🪓)
+        // --- CLUSTER DE BOTOES DE ACAO MOBILE (Substituido em runtime por UIManager com icones vetoriais) ---
         GameObject atkBtnObj = new GameObject("Btn_Mobile_Attack");
         atkBtnObj.transform.SetParent(canvasObj.transform, false);
         RectTransform atkRT = atkBtnObj.AddComponent<RectTransform>();
@@ -664,9 +789,8 @@ public class FragaSceneSetup : EditorWindow
         atkOutline.effectDistance = new Vector2(2, -2);
         UnityEngine.UI.Button atkBtn = atkBtnObj.AddComponent<UnityEngine.UI.Button>();
         atkBtn.onClick.AddListener(() => { if (combatSys != null) combatSys.TriggerAttack(); });
-        CreateButtonLabel(atkBtnObj.transform, "🪓\nGOLPE", 13);
+        CreateButtonLabel(atkBtnObj.transform, "GOLPE", 13);
 
-        // 2. Botão de Pulo (▲)
         GameObject jumpBtnObj = new GameObject("Btn_Mobile_Jump");
         jumpBtnObj.transform.SetParent(canvasObj.transform, false);
         RectTransform jumpRT = jumpBtnObj.AddComponent<RectTransform>();
@@ -681,9 +805,8 @@ public class FragaSceneSetup : EditorWindow
         jumpOutline.effectDistance = new Vector2(1.5f, -1.5f);
         UnityEngine.UI.Button jumpBtn = jumpBtnObj.AddComponent<UnityEngine.UI.Button>();
         jumpBtn.onClick.AddListener(() => { if (pc != null) pc.TryJump(); });
-        CreateButtonLabel(jumpBtnObj.transform, "▲\nPULAR", 11);
+        CreateButtonLabel(jumpBtnObj.transform, "PULAR", 11);
 
-        // 3. Botão de Coleta / Interação (✋)
         GameObject interactBtnObj = new GameObject("Btn_Mobile_Interact");
         interactBtnObj.transform.SetParent(canvasObj.transform, false);
         RectTransform intRT = interactBtnObj.AddComponent<RectTransform>();
@@ -698,9 +821,8 @@ public class FragaSceneSetup : EditorWindow
         intOutline.effectDistance = new Vector2(1.5f, -1.5f);
         UnityEngine.UI.Button intBtn = interactBtnObj.AddComponent<UnityEngine.UI.Button>();
         intBtn.onClick.AddListener(() => { if (resManager != null) resManager.TryHarvest(); });
-        CreateButtonLabel(interactBtnObj.transform, "✋\nCOLETAR", 11);
+        CreateButtonLabel(interactBtnObj.transform, "USAR", 11);
 
-        // 4. Botão de Mochila / Crafting (🎒)
         GameObject bagBtnObj = new GameObject("Btn_Mobile_Inventory");
         bagBtnObj.transform.SetParent(canvasObj.transform, false);
         RectTransform bagRT = bagBtnObj.AddComponent<RectTransform>();
@@ -715,9 +837,8 @@ public class FragaSceneSetup : EditorWindow
         bagOutline.effectDistance = new Vector2(1.5f, -1.5f);
         UnityEngine.UI.Button bagBtn = bagBtnObj.AddComponent<UnityEngine.UI.Button>();
         bagBtn.onClick.AddListener(() => { if (craftUI != null) craftUI.ToggleMenu(); });
-        CreateButtonLabel(bagBtnObj.transform, "🎒\nMOCHILA", 11);
+        CreateButtonLabel(bagBtnObj.transform, "MOCHILA", 11);
 
-        // 5. Botão de Agachamento (▼)
         GameObject crouchBtnObj = new GameObject("Btn_Mobile_Crouch");
         crouchBtnObj.transform.SetParent(canvasObj.transform, false);
         RectTransform crRT = crouchBtnObj.AddComponent<RectTransform>();
@@ -732,9 +853,8 @@ public class FragaSceneSetup : EditorWindow
         crOutline.effectDistance = new Vector2(1.5f, -1.5f);
         UnityEngine.UI.Button crBtn = crouchBtnObj.AddComponent<UnityEngine.UI.Button>();
         crBtn.onClick.AddListener(() => { if (pc != null) pc.ToggleCrouch(); });
-        CreateButtonLabel(crouchBtnObj.transform, "▼\nAGACHO", 10);
+        CreateButtonLabel(crouchBtnObj.transform, "AGACHO", 10);
 
-        // 6. Botão de Lanterna / Luz (🏮)
         GameObject lanternBtnObj = new GameObject("Btn_Mobile_Lantern");
         lanternBtnObj.transform.SetParent(canvasObj.transform, false);
         RectTransform lanRT = lanternBtnObj.AddComponent<RectTransform>();
@@ -749,7 +869,7 @@ public class FragaSceneSetup : EditorWindow
         lanOutline.effectDistance = new Vector2(1.5f, -1.5f);
         UnityEngine.UI.Button lanBtn = lanternBtnObj.AddComponent<UnityEngine.UI.Button>();
         lanBtn.onClick.AddListener(() => { if (sanity != null) sanity.ToggleLamp(); });
-        CreateButtonLabel(lanternBtnObj.transform, "🏮\nLUZ", 11);
+        CreateButtonLabel(lanternBtnObj.transform, "LUZ", 11);
 
 
         // 17. Associar o Orchestrator
@@ -760,7 +880,7 @@ public class FragaSceneSetup : EditorWindow
         gm.vultoManager = vultoManager;
         gm.mapRenderer = mapRenderer;
 
-        // Building System Removido (Movido para a seccao de Gestao)
+        // Building System
         buildSys.inventory = advInventory;
 
         // 18. SaveSystem
@@ -939,7 +1059,7 @@ public class FragaSceneSetup : EditorWindow
         mmm.seedInput = seedField;
         mmm.btnCreateWorld = createBtn;
         mmm.btnBackFromNewGame = backNgBtn;
-
+        
         mmm.masterVolumeSlider = volSlider;
         mmm.btnBackFromSettings = backSetBtn;
 

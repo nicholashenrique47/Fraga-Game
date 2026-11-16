@@ -2,10 +2,11 @@ using UnityEngine;
 using System.Runtime.InteropServices;
 
 /// FaunaManager: Gere a fauna (cervos, lobos, ursos, javalis e coelhos) via IA nativa e simulação procedural.
-/// Renderiza animais vivos sobre o relevo do terreno procedural, com animações e quedas de presas.
+/// Renderiza animais vivos sobre o relevo do terreno procedural, com animações LOD, flash de dano, HP e carcaças esfoláveis.
 public class FaunaManager : MonoBehaviour
 {
-    // P/Invoke para IA nativa
+    public static FaunaManager Instance { get; private set; }
+
     [DllImport("FragaNative", CallingConvention = CallingConvention.Cdecl)]
     private static extern void UpdateDeer(
         System.IntPtr posX, System.IntPtr posY, System.IntPtr velX, System.IntPtr velY,
@@ -25,14 +26,14 @@ public class FaunaManager : MonoBehaviour
         System.IntPtr mapData, int mapWidth, int mapHeight);
 
     [Header("Config")]
-    public int maxDeer = 14;
-    public int maxWolves = 6;
+    public int maxDeer = 22;
+    public int maxWolves = 10;
     public float deerWanderSpeed = 1.5f;
     public float deerFleeSpeed = 6f;
     public float deerDetectionRadius = 9f;
     public float wolfHuntSpeed = 4.2f;
     public float wolfAttackRange = 1.6f;
-    public float wolfDamage = 6f; // Dano moderado na sanidade/vida
+    public float wolfDamage = 6f;
 
     [Header("Rendering (Prefabs da Fauna)")]
     public GameObject deerPrefab;
@@ -49,12 +50,12 @@ public class FaunaManager : MonoBehaviour
     public ResourceManager resourceManager;
 
     // Deer SoA
-    private float[] deerPosX, deerPosY, deerVelX, deerVelY;
+    private float[] deerPosX, deerPosY, deerVelX, deerVelY, deerHP;
     private int[] deerStates;
     private GCHandle deerPxH, deerPyH, deerVxH, deerVyH, deerSH;
 
     // Wolf SoA
-    private float[] wolfPosX, wolfPosY, wolfVelX, wolfVelY;
+    private float[] wolfPosX, wolfPosY, wolfVelX, wolfVelY, wolfHP;
     private int[] wolfStates;
     private GCHandle wolfPxH, wolfPyH, wolfVxH, wolfVyH, wolfSH;
 
@@ -64,32 +65,44 @@ public class FaunaManager : MonoBehaviour
     private GameObject[] boarInstances;
     private GameObject[] rabbitInstances;
 
-    // Cooldown de ataque dos lobos
+    private AnimalProceduralAnimator[] deerAnims;
+    private AnimalProceduralAnimator[] wolfAnims;
+    private AnimalProceduralAnimator[] bearAnims;
+    private AnimalProceduralAnimator[] boarAnims;
+    private AnimalProceduralAnimator[] rabbitAnims;
+
     private float[] wolfAttackCooldowns;
-    
+
     // Ursos
-    public int maxBears = 3;
+    public int maxBears = 5;
     private float[] bearPosX, bearPosY;
+    private float[] bearVelX, bearVelY;
     private float[] bearHP;
 
     // Javalis (Wild Boars)
-    public int maxBoars = 5;
+    public int maxBoars = 9;
     private float[] boarPosX, boarPosY;
     private float[] boarHP;
     private float[] boarVelX, boarVelY;
-    
-    // Coelhos
-    public int maxRabbits = 14;
-    private float[] rabbitPosX, rabbitPosY;
 
-    // Caches
+    // Coelhos
+    public int maxRabbits = 20;
+    private float[] rabbitPosX, rabbitPosY;
+    private float[] rabbitVelX, rabbitVelY;
+
+    // Caches Zero-GC
     private TrapSystem trapSystemCache;
     private HapticManager hapticManagerCache;
+    private PlayerStatus playerStatusCache;
+    private Material cachedCarcassMat;
 
     private void Awake()
     {
+        if (Instance == null) Instance = this;
+
         trapSystemCache = FindAnyObjectByType<TrapSystem>();
         hapticManagerCache = FindAnyObjectByType<HapticManager>();
+        if (playerTransform != null) playerStatusCache = playerTransform.GetComponent<PlayerStatus>();
 
         if (deerPrefab == null) deerPrefab = Resources.Load<GameObject>("Prefabs/Deer_Prefab");
         if (wolfPrefab == null) wolfPrefab = Resources.Load<GameObject>("Prefabs/Wolf_Prefab");
@@ -103,11 +116,11 @@ public class FaunaManager : MonoBehaviour
         if (boarPrefab == null) boarPrefab = CreateProceduralAnimalFallback("Fallback_Boar", new Color(0.25f, 0.20f, 0.15f), new Vector3(0.7f, 0.8f, 1.3f), AnimalProceduralAnimator.LocomotionStyle.QuadrupedStalker);
         if (rabbitPrefab == null) rabbitPrefab = CreateProceduralAnimalFallback("Fallback_Rabbit", new Color(0.65f, 0.58f, 0.50f), new Vector3(0.35f, 0.35f, 0.5f), AnimalProceduralAnimator.LocomotionStyle.Hopper);
 
-        // Alocar e fixar arrays de cervos
         deerPosX = new float[maxDeer];
         deerPosY = new float[maxDeer];
         deerVelX = new float[maxDeer];
         deerVelY = new float[maxDeer];
+        deerHP = new float[maxDeer];
         deerStates = new int[maxDeer];
 
         deerPxH = GCHandle.Alloc(deerPosX, GCHandleType.Pinned);
@@ -116,11 +129,11 @@ public class FaunaManager : MonoBehaviour
         deerVyH = GCHandle.Alloc(deerVelY, GCHandleType.Pinned);
         deerSH = GCHandle.Alloc(deerStates, GCHandleType.Pinned);
 
-        // Alocar e fixar arrays de lobos
         wolfPosX = new float[maxWolves];
         wolfPosY = new float[maxWolves];
         wolfVelX = new float[maxWolves];
         wolfVelY = new float[maxWolves];
+        wolfHP = new float[maxWolves];
         wolfStates = new int[maxWolves];
 
         wolfPxH = GCHandle.Alloc(wolfPosX, GCHandleType.Pinned);
@@ -129,106 +142,142 @@ public class FaunaManager : MonoBehaviour
         wolfVyH = GCHandle.Alloc(wolfVelY, GCHandleType.Pinned);
         wolfSH = GCHandle.Alloc(wolfStates, GCHandleType.Pinned);
 
-        // Instancias Visuais
         deerInstances = new GameObject[maxDeer];
+        deerAnims = new AnimalProceduralAnimator[maxDeer];
         wolfInstances = new GameObject[maxWolves];
+        wolfAnims = new AnimalProceduralAnimator[maxWolves];
         wolfAttackCooldowns = new float[maxWolves];
-        
+
         bearInstances = new GameObject[maxBears];
+        bearAnims = new AnimalProceduralAnimator[maxBears];
         bearPosX = new float[maxBears];
         bearPosY = new float[maxBears];
+        bearVelX = new float[maxBears];
+        bearVelY = new float[maxBears];
         bearHP = new float[maxBears];
 
         boarInstances = new GameObject[maxBoars];
+        boarAnims = new AnimalProceduralAnimator[maxBoars];
         boarPosX = new float[maxBoars];
         boarPosY = new float[maxBoars];
         boarHP = new float[maxBoars];
         boarVelX = new float[maxBoars];
         boarVelY = new float[maxBoars];
-        
+
         rabbitInstances = new GameObject[maxRabbits];
+        rabbitAnims = new AnimalProceduralAnimator[maxRabbits];
         rabbitPosX = new float[maxRabbits];
         rabbitPosY = new float[maxRabbits];
+        rabbitVelX = new float[maxRabbits];
+        rabbitVelY = new float[maxRabbits];
 
         SpawnInitialFauna();
+    }
+
+    private void GetMapBounds(out float minB, out float maxW, out float maxH)
+    {
+        float w = (resourceManager != null && resourceManager.MapWidth > 0) ? resourceManager.MapWidth : FragaWorldBlueprint.DefaultWidth;
+        float h = (resourceManager != null && resourceManager.MapHeight > 0) ? resourceManager.MapHeight : FragaWorldBlueprint.DefaultHeight;
+        minB = 36f;
+        maxW = Mathf.Max(64f, w - 36f);
+        maxH = Mathf.Max(64f, h - 36f);
+    }
+
+    private Vector2 FindDryLandNear(float centerX, float centerZ, float minR, float maxR, float minB, float maxW, float maxH)
+    {
+        for (int attempt = 0; attempt < 16; attempt++)
+        {
+            float ang = Random.Range(0f, Mathf.PI * 2f);
+            float r = Random.Range(minR, maxR);
+            float cx = Mathf.Clamp(centerX + Mathf.Cos(ang) * r, minB, maxW);
+            float cz = Mathf.Clamp(centerZ + Mathf.Sin(ang) * r, minB, maxH);
+            if (FragaWorldBlueprint.IsInsideIsland(cx, cz) && FragaWorldBlueprint.GetWaterDepth(cx, cz) < 0.12f)
+            {
+                return new Vector2(cx, cz);
+            }
+        }
+        return new Vector2(Mathf.Clamp(centerX, minB, maxW), Mathf.Clamp(centerZ, minB, maxH));
     }
 
     private void SpawnInitialFauna()
     {
         GameObject faunaParent = new GameObject("Fauna_Instances");
+        FragaWorldBlueprint.EnsureInitialized();
 
-        float pX = (playerTransform != null) ? playerTransform.position.x : 50f;
-        float pZ = (playerTransform != null) ? playerTransform.position.z : 50f;
+        GetMapBounds(out float minB, out float maxW, out float maxH);
+        float pX = (playerTransform != null) ? playerTransform.position.x : FragaWorldBlueprint.CrashCampPos.x;
+        float pZ = (playerTransform != null) ? playerTransform.position.z : FragaWorldBlueprint.CrashCampPos.y;
 
-        // 1. Spawn cervos (Garante que os 3 primeiros fiquem em raio visivel inicial de 18m a 35m)
+        // 1. Spawn cervos
         for (int i = 0; i < maxDeer; i++)
         {
-            if (i < 3)
+            if (i < 4)
             {
-                float angle = i * 2.1f;
-                float r = Random.Range(18f, 32f);
-                deerPosX[i] = Mathf.Clamp(pX + Mathf.Cos(angle) * r, 5f, 95f);
-                deerPosY[i] = Mathf.Clamp(pZ + Mathf.Sin(angle) * r, 5f, 95f);
+                Vector2 dPos = FindDryLandNear(pX, pZ, 18f, 36f, minB, maxW, maxH);
+                deerPosX[i] = dPos.x;
+                deerPosY[i] = dPos.y;
             }
             else
             {
-                deerPosX[i] = Random.Range(10f, 90f);
-                deerPosY[i] = Random.Range(10f, 90f);
+                Vector2 anchor = (i % 3 == 0) ? FragaWorldBlueprint.HighlandLakePos : FragaWorldBlueprint.CrashCampPos;
+                Vector2 dPos = FindDryLandNear(anchor.x, anchor.y, 48f, 220f, minB, maxW, maxH);
+                deerPosX[i] = dPos.x;
+                deerPosY[i] = dPos.y;
             }
+            deerHP[i] = 50f;
 
-            if (deerPrefab != null) 
+            if (deerPrefab != null)
             {
                 float gy = TerrainMeshGenerator.GetTerrainHeight(deerPosX[i], deerPosY[i]);
                 deerInstances[i] = Instantiate(deerPrefab, new Vector3(deerPosX[i], gy, deerPosY[i]), Quaternion.identity, faunaParent.transform);
                 deerInstances[i].SetActive(true);
+                deerAnims[i] = deerInstances[i].GetComponent<AnimalProceduralAnimator>();
             }
         }
 
-        // 2. Spawn lobos nos arredores
+        // 2. Spawn lobos
         for (int i = 0; i < maxWolves; i++)
         {
-            float angle = (float)i / maxWolves * Mathf.PI * 2f;
-            wolfPosX[i] = Mathf.Clamp(pX + Mathf.Cos(angle) * 42f, 5f, 95f);
-            wolfPosY[i] = Mathf.Clamp(pZ + Mathf.Sin(angle) * 42f, 5f, 95f);
-            if (wolfPrefab != null) 
+            Vector2 anchor = (i < 4) ? new Vector2(pX, pZ) : FragaWorldBlueprint.CelticCastroPos;
+            Vector2 wPos = FindDryLandNear(anchor.x, anchor.y, 44f, 120f, minB, maxW, maxH);
+            wolfPosX[i] = wPos.x;
+            wolfPosY[i] = wPos.y;
+            wolfHP[i] = 65f;
+            if (wolfPrefab != null)
             {
                 float gy = TerrainMeshGenerator.GetTerrainHeight(wolfPosX[i], wolfPosY[i]);
                 wolfInstances[i] = Instantiate(wolfPrefab, new Vector3(wolfPosX[i], gy, wolfPosY[i]), Quaternion.identity, faunaParent.transform);
                 wolfInstances[i].SetActive(true);
+                wolfAnims[i] = wolfInstances[i].GetComponent<AnimalProceduralAnimator>();
             }
         }
-        
+
         // 3. Spawn Ursos
         for (int i = 0; i < maxBears; i++)
         {
-            bearPosX[i] = Random.Range(20f, 80f);
-            bearPosY[i] = Random.Range(20f, 80f);
-            bearHP[i] = 100f;
-            
+            Vector2 anchor = (i % 2 == 0) ? FragaWorldBlueprint.SacredCavePos : FragaWorldBlueprint.MountainSummitPos;
+            Vector2 bPos = FindDryLandNear(anchor.x, anchor.y, 24f, 110f, minB, maxW, maxH);
+            bearPosX[i] = bPos.x;
+            bearPosY[i] = bPos.y;
+            bearHP[i] = 110f;
+
             if (bearPrefab != null)
             {
                 float gy = TerrainMeshGenerator.GetTerrainHeight(bearPosX[i], bearPosY[i]);
                 bearInstances[i] = Instantiate(bearPrefab, new Vector3(bearPosX[i], gy, bearPosY[i]), Quaternion.identity, faunaParent.transform);
-                bearInstances[i].transform.localScale = Vector3.one * 1.4f;
+                bearInstances[i].transform.localScale = Vector3.one * 1.18f;
                 bearInstances[i].SetActive(true);
+                bearAnims[i] = bearInstances[i].GetComponent<AnimalProceduralAnimator>();
             }
         }
 
-        // 4. Spawn Javalis (Wild Boars)
+        // 4. Spawn Javalis
         for (int i = 0; i < maxBoars; i++)
         {
-            if (i < 2)
-            {
-                float angle = i * 3.4f;
-                float r = Random.Range(22f, 38f);
-                boarPosX[i] = Mathf.Clamp(pX + Mathf.Cos(angle) * r, 5f, 95f);
-                boarPosY[i] = Mathf.Clamp(pZ + Mathf.Sin(angle) * r, 5f, 95f);
-            }
-            else
-            {
-                boarPosX[i] = Random.Range(15f, 85f);
-                boarPosY[i] = Random.Range(15f, 85f);
-            }
+            Vector2 anchor = (i < 2) ? new Vector2(pX, pZ) : ((i % 2 == 0) ? FragaWorldBlueprint.SwampBasinPos : FragaWorldBlueprint.CrashCampPos);
+            Vector2 boPos = FindDryLandNear(anchor.x, anchor.y, i < 2 ? 22f : 55f, i < 2 ? 40f : 160f, minB, maxW, maxH);
+            boarPosX[i] = boPos.x;
+            boarPosY[i] = boPos.y;
             boarHP[i] = 60f;
 
             if (boarPrefab != null)
@@ -236,37 +285,33 @@ public class FaunaManager : MonoBehaviour
                 float gy = TerrainMeshGenerator.GetTerrainHeight(boarPosX[i], boarPosY[i]);
                 boarInstances[i] = Instantiate(boarPrefab, new Vector3(boarPosX[i], gy, boarPosY[i]), Quaternion.identity, faunaParent.transform);
                 boarInstances[i].SetActive(true);
+                boarAnims[i] = boarInstances[i].GetComponent<AnimalProceduralAnimator>();
             }
         }
-        
-        // 5. Spawn Coelhos (Presença constante nas imediações)
+
+        // 5. Spawn Coelhos
         for (int i = 0; i < maxRabbits; i++)
         {
-            if (i < 4)
-            {
-                float angle = i * 1.57f;
-                float r = Random.Range(12f, 26f);
-                rabbitPosX[i] = Mathf.Clamp(pX + Mathf.Cos(angle) * r, 5f, 95f);
-                rabbitPosY[i] = Mathf.Clamp(pZ + Mathf.Sin(angle) * r, 5f, 95f);
-            }
-            else
-            {
-                rabbitPosX[i] = Random.Range(10f, 90f);
-                rabbitPosY[i] = Random.Range(10f, 90f);
-            }
+            Vector2 rPos = FindDryLandNear(pX, pZ, i < 5 ? 12f : 40f, i < 5 ? 28f : 140f, minB, maxW, maxH);
+            rabbitPosX[i] = rPos.x;
+            rabbitPosY[i] = rPos.y;
 
             if (rabbitPrefab != null)
             {
                 float gy = TerrainMeshGenerator.GetTerrainHeight(rabbitPosX[i], rabbitPosY[i]);
                 rabbitInstances[i] = Instantiate(rabbitPrefab, new Vector3(rabbitPosX[i], gy, rabbitPosY[i]), Quaternion.identity, faunaParent.transform);
                 rabbitInstances[i].SetActive(true);
+                rabbitAnims[i] = rabbitInstances[i].GetComponent<AnimalProceduralAnimator>();
             }
         }
     }
 
+    private float nextAmbientRelocateTime = 0f;
+
     private void Update()
     {
         if (playerTransform == null || resourceManager == null) return;
+        if (playerStatusCache == null) playerStatusCache = playerTransform.GetComponent<PlayerStatus>();
 
         float px = playerTransform.position.x;
         float pz = playerTransform.position.z;
@@ -285,7 +330,6 @@ public class FaunaManager : MonoBehaviour
 
         if (mapData == System.IntPtr.Zero) return;
 
-        // Chamar IA nativa para cervos
         UpdateDeer(
             deerPxH.AddrOfPinnedObject(), deerPyH.AddrOfPinnedObject(),
             deerVxH.AddrOfPinnedObject(), deerVyH.AddrOfPinnedObject(),
@@ -295,7 +339,6 @@ public class FaunaManager : MonoBehaviour
             dt, deerWanderSpeed, deerFleeSpeed, deerDetectionRadius,
             mapData, mw, mh);
 
-        // Chamar IA nativa para lobos
         UpdateWolves(
             wolfPxH.AddrOfPinnedObject(), wolfPyH.AddrOfPinnedObject(),
             wolfVxH.AddrOfPinnedObject(), wolfVyH.AddrOfPinnedObject(),
@@ -305,21 +348,51 @@ public class FaunaManager : MonoBehaviour
             dt, wolfHuntSpeed, isNight,
             mapData, mw, mh);
 
-        // Verificar ataques de lobos ao jogador
         CheckWolfAttacks(px, pz, dt);
-        
+
         if (trapSystemCache != null)
         {
             trapSystemCache.CheckTrapsForWolves(wolfPosX, wolfPosY, maxWolves);
         }
 
-        // Atualizar Ursos e Javalis
         UpdateBears(px, pz, dt);
         UpdateBoars(px, pz, dt);
         UpdateRabbits(px, pz, dt);
 
-        // Atualizar posições e animações visuais com snap ao relevo do terreno
+        if (Time.time >= nextAmbientRelocateTime)
+        {
+            nextAmbientRelocateTime = Time.time + 2.5f;
+            RelocateFarFauna(px, pz);
+        }
+
         UpdateRenderTransforms();
+    }
+
+    private void RelocateFarFauna(float px, float pz)
+    {
+        GetMapBounds(out float minB, out float maxW, out float maxH);
+        const float maxRoamSq = 190f * 190f;
+
+        void CheckArray(float[] arrX, float[] arrZ, int count, float minRing, float maxRing)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                if (arrX[i] < 0f) continue;
+                float dx = arrX[i] - px;
+                float dz = arrZ[i] - pz;
+                if (dx * dx + dz * dz > maxRoamSq)
+                {
+                    Vector2 np = FindDryLandNear(px, pz, minRing, maxRing, minB, maxW, maxH);
+                    arrX[i] = np.x;
+                    arrZ[i] = np.y;
+                }
+            }
+        }
+
+        CheckArray(deerPosX, deerPosY, maxDeer, 68f, 130f);
+        CheckArray(wolfPosX, wolfPosY, maxWolves, 74f, 135f);
+        CheckArray(boarPosX, boarPosY, maxBoars, 68f, 130f);
+        CheckArray(rabbitPosX, rabbitPosY, maxRabbits, 60f, 115f);
     }
 
     private void CheckWolfAttacks(float px, float pz, float dt)
@@ -330,7 +403,7 @@ public class FaunaManager : MonoBehaviour
         {
             wolfAttackCooldowns[i] -= dt;
 
-            if (wolfStates[i] == 1) // Hunting
+            if (wolfStates[i] == 1)
             {
                 float dx = wolfPosX[i] - px;
                 float dy = wolfPosY[i] - pz;
@@ -341,54 +414,62 @@ public class FaunaManager : MonoBehaviour
                     if (playerSanity != null)
                     {
                         playerSanity.sanity -= wolfDamage;
-                        Debug.Log("[Fauna] Lobo atacou o jogador!");
-
                         if (hapticManagerCache != null) hapticManagerCache.TriggerHeavyVibration();
+                    }
+                    if (playerStatusCache != null)
+                    {
+                        playerStatusCache.TakeDamage(wolfDamage * 1.4f);
                     }
                     wolfAttackCooldowns[i] = 3.5f;
                 }
             }
         }
     }
-    
+
     private void UpdateBears(float px, float pz, float dt)
     {
+        GetMapBounds(out float minB, out float maxW, out float maxH);
         for (int i = 0; i < maxBears; i++)
         {
             if (bearHP[i] <= 0) continue;
-            
+
             float dx = px - bearPosX[i];
             float dz = pz - bearPosY[i];
             float distSq = dx * dx + dz * dz;
-            
-            if (distSq < 15f * 15f) // Aggro
+
+            if (distSq < 15f * 15f)
             {
                 float dist = Mathf.Sqrt(distSq);
-                bearPosX[i] += (dx / dist) * 2.5f * dt;
-                bearPosY[i] += (dz / dist) * 2.5f * dt;
-                
-                if (dist < 2.0f)
+                if (dist > 0.05f)
                 {
-                    if (playerSanity != null)
-                    {
-                        PlayerStatus ps = playerTransform.GetComponent<PlayerStatus>();
-                        if (ps != null) ps.TakeDamagePassive(10f * dt);
-                        
-                        if (hapticManagerCache != null && Time.frameCount % 30 == 0) hapticManagerCache.TriggerHeavyVibration();
-                    }
+                    bearVelX[i] = (dx / dist) * 2.5f;
+                    bearVelY[i] = (dz / dist) * 2.5f;
+                    bearPosX[i] += bearVelX[i] * dt;
+                    bearPosY[i] += bearVelY[i] * dt;
+                }
+
+                if (dist < 2.0f && playerStatusCache != null)
+                {
+                    playerStatusCache.TakeDamagePassive(10f * dt);
+                    if (hapticManagerCache != null && Time.frameCount % 30 == 0) hapticManagerCache.TriggerHeavyVibration();
                 }
             }
             else
             {
-                // Wander sutil
-                bearPosX[i] += Mathf.Sin(Time.time * 0.3f + i) * 0.4f * dt;
-                bearPosY[i] += Mathf.Cos(Time.time * 0.3f + i) * 0.4f * dt;
+                bearVelX[i] = Mathf.Sin(Time.time * 0.3f + i) * 0.65f;
+                bearVelY[i] = Mathf.Cos(Time.time * 0.3f + i) * 0.65f;
+                bearPosX[i] += bearVelX[i] * dt;
+                bearPosY[i] += bearVelY[i] * dt;
             }
+
+            bearPosX[i] = Mathf.Clamp(bearPosX[i], minB, maxW);
+            bearPosY[i] = Mathf.Clamp(bearPosY[i], minB, maxH);
         }
     }
 
     private void UpdateBoars(float px, float pz, float dt)
     {
+        GetMapBounds(out float minB, out float maxW, out float maxH);
         for (int i = 0; i < maxBoars; i++)
         {
             if (boarHP[i] <= 0) continue;
@@ -397,9 +478,9 @@ public class FaunaManager : MonoBehaviour
             float dz = pz - boarPosY[i];
             float distSq = dx * dx + dz * dz;
 
-            if (distSq < 8f * 8f) // Foge se o jogador aproximar a menos de 8m
+            if (distSq < 8f * 8f)
             {
-                float dist = Mathf.Sqrt(distSq);
+                float dist = Mathf.Max(0.05f, Mathf.Sqrt(distSq));
                 boarVelX[i] = -(dx / dist) * 4.5f;
                 boarVelY[i] = -(dz / dist) * 4.5f;
                 boarPosX[i] += boarVelX[i] * dt;
@@ -407,42 +488,49 @@ public class FaunaManager : MonoBehaviour
             }
             else
             {
-                // Pastejo tranquilo
                 boarVelX[i] = Mathf.Sin(Time.time * 0.4f + i * 2f) * 1.2f;
                 boarVelY[i] = Mathf.Cos(Time.time * 0.4f + i * 2f) * 1.2f;
                 boarPosX[i] += boarVelX[i] * dt;
                 boarPosY[i] += boarVelY[i] * dt;
             }
 
-            boarPosX[i] = Mathf.Clamp(boarPosX[i], 2f, resourceManager.MapWidth - 3f);
-            boarPosY[i] = Mathf.Clamp(boarPosY[i], 2f, resourceManager.MapHeight - 3f);
+            boarPosX[i] = Mathf.Clamp(boarPosX[i], minB, maxW);
+            boarPosY[i] = Mathf.Clamp(boarPosY[i], minB, maxH);
         }
     }
-    
+
     private void UpdateRabbits(float px, float pz, float dt)
     {
+        GetMapBounds(out float minB, out float maxW, out float maxH);
         for (int i = 0; i < maxRabbits; i++)
         {
             if (rabbitPosX[i] < 0) continue;
-            
+
             float dx = rabbitPosX[i] - px;
             float dz = rabbitPosY[i] - pz;
             float distSq = dx * dx + dz * dz;
-            
-            if (distSq < 10f * 10f) // Foge em ziguezague
+
+            if (distSq < 10f * 10f)
             {
                 float dist = Mathf.Sqrt(distSq);
-                rabbitPosX[i] += (dx / dist) * 4.2f * dt;
-                rabbitPosY[i] += (dz / dist) * 4.2f * dt;
+                if (dist > 0.01f)
+                {
+                    rabbitVelX[i] = (dx / dist) * 4.2f;
+                    rabbitVelY[i] = (dz / dist) * 4.2f;
+                    rabbitPosX[i] += rabbitVelX[i] * dt;
+                    rabbitPosY[i] += rabbitVelY[i] * dt;
+                }
             }
             else
             {
-                rabbitPosX[i] += Mathf.Sin(Time.time * 0.7f + i) * 0.8f * dt;
-                rabbitPosY[i] += Mathf.Cos(Time.time * 0.7f + i) * 0.8f * dt;
+                rabbitVelX[i] = Mathf.Sin(Time.time * 0.7f + i) * 0.8f;
+                rabbitVelY[i] = Mathf.Cos(Time.time * 0.7f + i) * 0.8f;
+                rabbitPosX[i] += rabbitVelX[i] * dt;
+                rabbitPosY[i] += rabbitVelY[i] * dt;
             }
-            
-            rabbitPosX[i] = Mathf.Clamp(rabbitPosX[i], 2f, resourceManager.MapWidth - 3f);
-            rabbitPosY[i] = Mathf.Clamp(rabbitPosY[i], 2f, resourceManager.MapHeight - 3f);
+
+            rabbitPosX[i] = Mathf.Clamp(rabbitPosX[i], minB, maxW);
+            rabbitPosY[i] = Mathf.Clamp(rabbitPosY[i], minB, maxH);
         }
     }
 
@@ -451,20 +539,16 @@ public class FaunaManager : MonoBehaviour
         if (deerIndex < 0 || deerIndex >= maxDeer) return;
 
         float gy = TerrainMeshGenerator.GetTerrainHeight(deerPosX[deerIndex], deerPosY[deerIndex]);
-        Vector3 dropPos = new Vector3(deerPosX[deerIndex], gy + 0.2f, deerPosY[deerIndex]);
-        
-        if (LootManager.Instance != null)
-        {
-            LootManager.Instance.DropItem(104, 2, dropPos); // 2x Carne Crua
-            LootManager.Instance.DropItem(105, 1, dropPos); // 1x Pele de Animal
-        }
+        Vector3 dropPos = new Vector3(deerPosX[deerIndex], gy, deerPosY[deerIndex]);
 
-        Debug.Log("[Fauna] Cervo caçado. Loot liberado no solo.");
+        SpawnCarcass("Cervo", dropPos, new Color(0.55f, 0.35f, 0.18f), new Vector3(0.75f, 0.50f, 1.35f), 104, 2, 105, 2, 2);
 
-        deerPosX[deerIndex] = Random.Range(10f, 90f);
-        deerPosY[deerIndex] = Random.Range(10f, 90f);
+        GetMapBounds(out float minB, out float maxW, out float maxH);
+        deerPosX[deerIndex] = Random.Range(minB, maxW);
+        deerPosY[deerIndex] = Random.Range(minB, maxH);
         deerVelX[deerIndex] = 0f;
         deerVelY[deerIndex] = 0f;
+        deerHP[deerIndex] = 50f;
     }
 
     public void TryHuntNearby()
@@ -486,72 +570,108 @@ public class FaunaManager : MonoBehaviour
                 return;
             }
         }
-        Debug.Log("[Fauna] Nenhum cervo ao alcance.");
+    }
+
+    public bool TryDamageFaunaInRay(Ray ray, float maxRange, float radius, float damage, out Vector3 hitPos, out bool killed)
+    {
+        hitPos = Vector3.zero;
+        killed = false;
+
+        int bestKind = -1; // 0=deer, 1=wolf, 2=bear, 3=boar, 4=rabbit
+        int bestIdx = -1;
+        float bestProj = maxRange + 0.4f;
+        Vector3 bestHitPos = Vector3.zero;
+
+        void TestArray(float[] arrX, float[] arrZ, int count, int kind, float bodyRadius, float centerYOffset, float[] hpArr)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                if (arrX[i] < 0f) continue;
+                if (hpArr != null && hpArr[i] <= 0f) continue;
+
+                float gy = TerrainMeshGenerator.GetTerrainHeight(arrX[i], arrZ[i]);
+                Vector3 center = new Vector3(arrX[i], gy + centerYOffset, arrZ[i]);
+                Vector3 toCenter = center - ray.origin;
+                float proj = Vector3.Dot(toCenter, ray.direction);
+                if (proj < -0.15f || proj > maxRange + 0.4f) continue;
+
+                Vector3 closest = ray.origin + ray.direction * Mathf.Max(0f, proj);
+                float dx = center.x - closest.x;
+                float dz = center.z - closest.z;
+                float dy = Mathf.Abs(center.y - closest.y);
+                float thr = radius + bodyRadius;
+
+                if (dx * dx + dz * dz <= thr * thr && dy <= bodyRadius + 0.65f)
+                {
+                    if (proj < bestProj)
+                    {
+                        bestProj = proj;
+                        bestKind = kind;
+                        bestIdx = i;
+                        bestHitPos = center;
+                    }
+                }
+            }
+        }
+
+        TestArray(deerPosX, deerPosY, maxDeer, 0, 0.72f, 0.68f, deerHP);
+        TestArray(wolfPosX, wolfPosY, maxWolves, 1, 0.62f, 0.55f, wolfHP);
+        TestArray(bearPosX, bearPosY, maxBears, 2, 0.95f, 0.85f, bearHP);
+        TestArray(boarPosX, boarPosY, maxBoars, 3, 0.65f, 0.48f, boarHP);
+        TestArray(rabbitPosX, rabbitPosY, maxRabbits, 4, 0.42f, 0.25f, null);
+
+        if (bestIdx < 0) return false;
+        hitPos = bestHitPos;
+
+        killed = ApplyDamageToAnimal(bestKind, bestIdx, damage, hitPos);
+        return true;
     }
 
     public bool TryDamageFaunaAt(Vector3 hitPoint, float damage)
     {
+        return TryDamageFaunaAt(hitPoint, damage, out _);
+    }
+
+    public bool TryDamageFaunaAt(Vector3 hitPoint, float damage, out bool killed)
+    {
+        killed = false;
+
         // 1. Cervos
         for (int i = 0; i < maxDeer; i++)
         {
             float dx = deerPosX[i] - hitPoint.x;
             float dy = deerPosY[i] - hitPoint.z;
-            
-            if (dx * dx + dy * dy < 4.5f)
+            if (dx * dx + dy * dy < 4.2f)
             {
                 float gy = TerrainMeshGenerator.GetTerrainHeight(deerPosX[i], deerPosY[i]);
-                HuntDeer(i);
-                if (VFXPoolManager.Instance != null) VFXPoolManager.Instance.PlayDeathVFX(new Vector3(deerPosX[i], gy + 0.3f, deerPosY[i]));
+                killed = ApplyDamageToAnimal(0, i, damage, new Vector3(deerPosX[i], gy + 0.6f, deerPosY[i]));
                 return true;
             }
         }
-        
+
         // 2. Lobos
         for (int i = 0; i < maxWolves; i++)
         {
             float dx = wolfPosX[i] - hitPoint.x;
             float dy = wolfPosY[i] - hitPoint.z;
-            
-            if (dx * dx + dy * dy < 4.5f)
+            if (dx * dx + dy * dy < 4.2f)
             {
                 float gy = TerrainMeshGenerator.GetTerrainHeight(wolfPosX[i], wolfPosY[i]);
-                if (VFXPoolManager.Instance != null) VFXPoolManager.Instance.PlayDeathVFX(new Vector3(wolfPosX[i], gy + 0.3f, wolfPosY[i]));
-                if (LootManager.Instance != null)
-                {
-                    LootManager.Instance.DropItem(105, 1, new Vector3(wolfPosX[i], gy + 0.2f, wolfPosY[i])); // Pele de Lobo
-                }
-                wolfPosX[i] = Random.Range(10f, 90f);
-                wolfPosY[i] = Random.Range(10f, 90f);
-                Debug.LogWarning("[Fauna] Lobo abatido!");
+                killed = ApplyDamageToAnimal(1, i, damage, new Vector3(wolfPosX[i], gy + 0.5f, wolfPosY[i]));
                 return true;
             }
         }
-        
+
         // 3. Ursos
         for (int i = 0; i < maxBears; i++)
         {
             if (bearHP[i] <= 0) continue;
-            
             float dx = bearPosX[i] - hitPoint.x;
             float dy = bearPosY[i] - hitPoint.z;
-            
-            if (dx * dx + dy * dy < 6.5f)
+            if (dx * dx + dy * dy < 6.2f)
             {
-                bearHP[i] -= damage;
                 float gy = TerrainMeshGenerator.GetTerrainHeight(bearPosX[i], bearPosY[i]);
-                Debug.Log($"[Fauna] Urso sofreu {damage} dano. HP: {bearHP[i]}");
-                
-                if (bearHP[i] <= 0)
-                {
-                    if (VFXPoolManager.Instance != null) VFXPoolManager.Instance.PlayDeathVFX(new Vector3(bearPosX[i], gy + 0.5f, bearPosY[i]));
-                    if (LootManager.Instance != null)
-                    {
-                        LootManager.Instance.DropItem(104, 5, new Vector3(bearPosX[i], gy + 0.2f, bearPosY[i])); // 5x Carne
-                        LootManager.Instance.DropItem(105, 3, new Vector3(bearPosX[i], gy + 0.2f, bearPosY[i])); // 3x Pele
-                    }
-                    Debug.LogWarning("[Fauna] URSO ABATIDO!");
-                    bearPosX[i] = -1000f; 
-                }
+                killed = ApplyDamageToAnimal(2, i, damage, new Vector3(bearPosX[i], gy + 0.7f, bearPosY[i]));
                 return true;
             }
         }
@@ -560,63 +680,160 @@ public class FaunaManager : MonoBehaviour
         for (int i = 0; i < maxBoars; i++)
         {
             if (boarHP[i] <= 0) continue;
-
             float dx = boarPosX[i] - hitPoint.x;
             float dy = boarPosY[i] - hitPoint.z;
-
-            if (dx * dx + dy * dy < 5.0f)
+            if (dx * dx + dy * dy < 4.8f)
             {
-                boarHP[i] -= damage;
                 float gy = TerrainMeshGenerator.GetTerrainHeight(boarPosX[i], boarPosY[i]);
-
-                if (boarHP[i] <= 0)
-                {
-                    if (VFXPoolManager.Instance != null) VFXPoolManager.Instance.PlayDeathVFX(new Vector3(boarPosX[i], gy + 0.3f, boarPosY[i]));
-                    if (LootManager.Instance != null)
-                    {
-                        LootManager.Instance.DropItem(104, 3, new Vector3(boarPosX[i], gy + 0.2f, boarPosY[i])); // 3x Carne
-                        LootManager.Instance.DropItem(105, 2, new Vector3(boarPosX[i], gy + 0.2f, boarPosY[i])); // 2x Pele
-                    }
-                    Debug.LogWarning("[Fauna] Javali abatido!");
-                    boarPosX[i] = Random.Range(10f, 90f);
-                    boarPosY[i] = Random.Range(10f, 90f);
-                    boarHP[i] = 60f;
-                }
+                killed = ApplyDamageToAnimal(3, i, damage, new Vector3(boarPosX[i], gy + 0.45f, boarPosY[i]));
                 return true;
             }
         }
-        
+
         // 5. Coelhos
         for (int i = 0; i < maxRabbits; i++)
         {
             if (rabbitPosX[i] < 0) continue;
-            
             float dx = rabbitPosX[i] - hitPoint.x;
             float dy = rabbitPosY[i] - hitPoint.z;
             if (dx * dx + dy * dy < 3.0f)
             {
                 float gy = TerrainMeshGenerator.GetTerrainHeight(rabbitPosX[i], rabbitPosY[i]);
-                if (LootManager.Instance != null)
-                {
-                    LootManager.Instance.DropItem(113, 1, new Vector3(rabbitPosX[i], gy + 0.15f, rabbitPosY[i])); // Carne Leve
-                }
-                if (VFXPoolManager.Instance != null) VFXPoolManager.Instance.PlayDeathVFX(new Vector3(hitPoint.x, gy + 0.2f, hitPoint.z));
-                rabbitPosX[i] = Random.Range(10f, 90f);
-                rabbitPosY[i] = Random.Range(10f, 90f);
+                killed = ApplyDamageToAnimal(4, i, damage, new Vector3(rabbitPosX[i], gy + 0.25f, rabbitPosY[i]));
                 return true;
             }
         }
-        
+
         return false;
+    }
+
+    private bool ApplyDamageToAnimal(int kind, int i, float damage, Vector3 hitPos)
+    {
+        if (VFXPoolManager.Instance != null)
+            VFXPoolManager.Instance.PlayBloodSplashVFX(hitPos, Vector3.up);
+
+        GetMapBounds(out float minB, out float maxW, out float maxH);
+
+        switch (kind)
+        {
+            case 0: // Cervo
+                deerHP[i] -= damage;
+                if (deerAnims[i] != null) deerAnims[i].TriggerHitFlash();
+                if (deerHP[i] <= 0f)
+                {
+                    HuntDeer(i);
+                    return true;
+                }
+                deerStates[i] = 1; // Foge ao ser ferido
+                return false;
+
+            case 1: // Lobo
+                wolfHP[i] -= damage;
+                if (wolfAnims[i] != null) wolfAnims[i].TriggerHitFlash();
+                if (wolfHP[i] <= 0f)
+                {
+                    float gy = TerrainMeshGenerator.GetTerrainHeight(wolfPosX[i], wolfPosY[i]);
+                    Vector3 pos = new Vector3(wolfPosX[i], gy, wolfPosY[i]);
+                    SpawnCarcass("Lobo", pos, new Color(0.28f, 0.28f, 0.30f), new Vector3(0.55f, 0.40f, 1.15f), 104, 1, 105, 2, 2);
+                    wolfPosX[i] = Random.Range(minB, maxW);
+                    wolfPosY[i] = Random.Range(minB, maxH);
+                    wolfHP[i] = 65f;
+                    return true;
+                }
+                return false;
+
+            case 2: // Urso
+                bearHP[i] -= damage;
+                if (bearAnims[i] != null) bearAnims[i].TriggerHitFlash();
+                if (bearHP[i] <= 0f)
+                {
+                    float gy = TerrainMeshGenerator.GetTerrainHeight(bearPosX[i], bearPosY[i]);
+                    Vector3 pos = new Vector3(bearPosX[i], gy, bearPosY[i]);
+                    SpawnCarcass("Urso Pardo", pos, new Color(0.22f, 0.14f, 0.08f), new Vector3(1.05f, 0.72f, 1.85f), 104, 5, 105, 3, 4, 115);
+                    bearPosX[i] = -1000f;
+                    return true;
+                }
+                return false;
+
+            case 3: // Javali
+                boarHP[i] -= damage;
+                if (boarAnims[i] != null) boarAnims[i].TriggerHitFlash();
+                if (boarHP[i] <= 0f)
+                {
+                    float gy = TerrainMeshGenerator.GetTerrainHeight(boarPosX[i], boarPosY[i]);
+                    Vector3 pos = new Vector3(boarPosX[i], gy, boarPosY[i]);
+                    SpawnCarcass("Javali", pos, new Color(0.25f, 0.20f, 0.15f), new Vector3(0.65f, 0.45f, 1.15f), 104, 3, 105, 2, 2);
+                    boarPosX[i] = Random.Range(minB, maxW);
+                    boarPosY[i] = Random.Range(minB, maxH);
+                    boarHP[i] = 60f;
+                    return true;
+                }
+                return false;
+
+            case 4: // Coelho
+                float rGy = TerrainMeshGenerator.GetTerrainHeight(rabbitPosX[i], rabbitPosY[i]);
+                if (LootManager.Instance != null)
+                {
+                    Vector3 dropAt = new Vector3(rabbitPosX[i], rGy + 0.15f, rabbitPosY[i]);
+                    LootManager.Instance.DropItem(113, 1, dropAt);
+                    if (Random.value < 0.5f) LootManager.Instance.DropItem(120, 1, dropAt);
+                }
+                rabbitPosX[i] = Random.Range(minB, maxW);
+                rabbitPosY[i] = Random.Range(minB, maxH);
+                return true;
+        }
+        return false;
+    }
+
+    private void SpawnCarcass(string displayName, Vector3 worldPos, Color hideColor, Vector3 size, int meatId, int meatAmt, int hideId, int hideAmt, int boneAmt = 2, int bonusId = -1)
+    {
+        GameObject carcassGo = new GameObject($"Carcass_{displayName}");
+        carcassGo.transform.position = worldPos + Vector3.up * (size.y * 0.22f);
+        carcassGo.transform.rotation = Quaternion.Euler(0f, Random.Range(0f, 360f), 82f);
+
+        if (cachedCarcassMat == null)
+        {
+            cachedCarcassMat = new Material(Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard"));
+            cachedCarcassMat.SetFloat("_Smoothness", 0.18f);
+        }
+
+        GameObject body = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+        body.name = "CarcassBody";
+        body.transform.SetParent(carcassGo.transform, false);
+        body.transform.localScale = new Vector3(size.x, size.z * 0.5f, size.y);
+        body.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+        Collider childCol = body.GetComponent<Collider>();
+        if (childCol != null) Destroy(childCol);
+
+        Renderer r = body.GetComponent<Renderer>();
+        r.sharedMaterial = cachedCarcassMat;
+        MaterialPropertyBlock mpb = new MaterialPropertyBlock();
+        mpb.SetColor("_BaseColor", hideColor * 0.78f);
+        mpb.SetColor("_Color", hideColor * 0.78f);
+        r.SetPropertyBlock(mpb);
+
+        BoxCollider box = carcassGo.AddComponent<BoxCollider>();
+        box.size = new Vector3(Mathf.Max(1.0f, size.x * 1.4f), Mathf.Max(0.75f, size.y * 1.3f), Mathf.Max(1.2f, size.z * 1.15f));
+        box.center = Vector3.zero;
+
+        SkinningCarcass skin = carcassGo.AddComponent<SkinningCarcass>();
+        skin.animalDisplayName = displayName;
+        skin.meatItemId = meatId;
+        skin.meatAmount = meatAmt;
+        skin.hideItemId = hideId;
+        skin.hideAmount = hideAmt;
+        skin.boneItemId = 120;
+        skin.boneAmount = boneAmt;
+        skin.bonusDropId = bonusId;
     }
 
     private void UpdateRenderTransforms()
     {
         float px = playerTransform.position.x;
         float pz = playerTransform.position.z;
-        float cullDistSq = 4900f; // 70 * 70 m
+        float cullDist = GalicianOptimizationManager.Instance != null ? GalicianOptimizationManager.Instance.wildlifeCullDist : 70f;
+        float cullDistSq = cullDist * cullDist;
 
-        // 1. Cervos com snap ao terreno
         for (int i = 0; i < maxDeer; i++)
         {
             if (deerInstances[i] != null)
@@ -637,10 +854,14 @@ public class FaunaManager : MonoBehaviour
                     Quaternion targetRot = Quaternion.LookRotation(moveDir.normalized);
                     deerInstances[i].transform.rotation = Quaternion.Slerp(deerInstances[i].transform.rotation, targetRot, Time.deltaTime * 6f);
                 }
+                if (deerAnims[i] != null)
+                {
+                    deerAnims[i].SetAnimState(deerStates[i] == 1 ? AnimalProceduralAnimator.AnimState.Flee :
+                        (moveDir.sqrMagnitude > 0.02f ? AnimalProceduralAnimator.AnimState.Move : AnimalProceduralAnimator.AnimState.Idle));
+                }
             }
         }
 
-        // 2. Lobos com snap ao terreno
         for (int i = 0; i < maxWolves; i++)
         {
             if (wolfInstances[i] != null)
@@ -661,10 +882,16 @@ public class FaunaManager : MonoBehaviour
                     Quaternion targetRot = Quaternion.LookRotation(moveDir.normalized);
                     wolfInstances[i].transform.rotation = Quaternion.Slerp(wolfInstances[i].transform.rotation, targetRot, Time.deltaTime * 6f);
                 }
+                if (wolfAnims[i] != null)
+                {
+                    var targetState = (wolfStates[i] == 1 && distSq < 16f)
+                        ? AnimalProceduralAnimator.AnimState.TelegraphAttack
+                        : (moveDir.sqrMagnitude > 0.02f ? AnimalProceduralAnimator.AnimState.Move : AnimalProceduralAnimator.AnimState.Idle);
+                    wolfAnims[i].SetAnimState(targetState);
+                }
             }
         }
-        
-        // 3. Ursos com snap ao terreno
+
         for (int i = 0; i < maxBears; i++)
         {
             if (bearInstances[i] != null)
@@ -672,15 +899,28 @@ public class FaunaManager : MonoBehaviour
                 float distSq = (px - bearPosX[i]) * (px - bearPosX[i]) + (pz - bearPosY[i]) * (pz - bearPosY[i]);
                 bool isAlive = bearHP[i] > 0 && bearPosX[i] > 0;
                 bearInstances[i].SetActive(isAlive && distSq <= cullDistSq);
-                if (isAlive)
+                if (isAlive && distSq <= cullDistSq)
                 {
                     float gy = TerrainMeshGenerator.GetTerrainHeight(bearPosX[i], bearPosY[i]);
                     bearInstances[i].transform.position = new Vector3(bearPosX[i], gy, bearPosY[i]);
+
+                    Vector3 moveDir = new Vector3(bearVelX[i], 0, bearVelY[i]);
+                    if (moveDir.sqrMagnitude > 0.01f)
+                    {
+                        Quaternion targetRot = Quaternion.LookRotation(moveDir.normalized);
+                        bearInstances[i].transform.rotation = Quaternion.Slerp(bearInstances[i].transform.rotation, targetRot, Time.deltaTime * 5f);
+                    }
+                    if (bearAnims[i] != null)
+                    {
+                        var targetState = distSq < 14f
+                            ? AnimalProceduralAnimator.AnimState.TelegraphAttack
+                            : (moveDir.sqrMagnitude > 0.02f ? AnimalProceduralAnimator.AnimState.Move : AnimalProceduralAnimator.AnimState.Idle);
+                        bearAnims[i].SetAnimState(targetState);
+                    }
                 }
             }
         }
 
-        // 4. Javalis com snap ao terreno
         for (int i = 0; i < maxBoars; i++)
         {
             if (boarInstances[i] != null)
@@ -688,7 +928,7 @@ public class FaunaManager : MonoBehaviour
                 float distSq = (px - boarPosX[i]) * (px - boarPosX[i]) + (pz - boarPosY[i]) * (pz - boarPosY[i]);
                 bool isAlive = boarHP[i] > 0;
                 boarInstances[i].SetActive(isAlive && distSq <= cullDistSq);
-                if (isAlive)
+                if (isAlive && distSq <= cullDistSq)
                 {
                     float gy = TerrainMeshGenerator.GetTerrainHeight(boarPosX[i], boarPosY[i]);
                     boarInstances[i].transform.position = new Vector3(boarPosX[i], gy, boarPosY[i]);
@@ -699,11 +939,15 @@ public class FaunaManager : MonoBehaviour
                         Quaternion targetRot = Quaternion.LookRotation(moveDir.normalized);
                         boarInstances[i].transform.rotation = Quaternion.Slerp(boarInstances[i].transform.rotation, targetRot, Time.deltaTime * 6f);
                     }
+                    if (boarAnims[i] != null)
+                    {
+                        boarAnims[i].SetAnimState(distSq < 64f ? AnimalProceduralAnimator.AnimState.Flee :
+                            (moveDir.sqrMagnitude > 0.02f ? AnimalProceduralAnimator.AnimState.Move : AnimalProceduralAnimator.AnimState.Idle));
+                    }
                 }
             }
         }
-        
-        // 5. Coelhos com snap ao terreno
+
         for (int i = 0; i < maxRabbits; i++)
         {
             if (rabbitInstances[i] != null)
@@ -711,16 +955,27 @@ public class FaunaManager : MonoBehaviour
                 float distSq = (px - rabbitPosX[i]) * (px - rabbitPosX[i]) + (pz - rabbitPosY[i]) * (pz - rabbitPosY[i]);
                 bool isAlive = rabbitPosX[i] >= 0;
                 rabbitInstances[i].SetActive(isAlive && distSq <= cullDistSq);
-                if (isAlive)
+                if (isAlive && distSq <= cullDistSq)
                 {
                     float gy = TerrainMeshGenerator.GetTerrainHeight(rabbitPosX[i], rabbitPosY[i]);
                     rabbitInstances[i].transform.position = new Vector3(rabbitPosX[i], gy, rabbitPosY[i]);
+
+                    Vector3 moveDir = new Vector3(rabbitVelX[i], 0, rabbitVelY[i]);
+                    if (moveDir.sqrMagnitude > 0.01f)
+                    {
+                        Quaternion targetRot = Quaternion.LookRotation(moveDir.normalized);
+                        rabbitInstances[i].transform.rotation = Quaternion.Slerp(rabbitInstances[i].transform.rotation, targetRot, Time.deltaTime * 8f);
+                    }
+                    if (rabbitAnims[i] != null)
+                    {
+                        rabbitAnims[i].SetAnimState(distSq < 100f ? AnimalProceduralAnimator.AnimState.Flee :
+                            (moveDir.sqrMagnitude > 0.02f ? AnimalProceduralAnimator.AnimState.Move : AnimalProceduralAnimator.AnimState.Idle));
+                    }
                 }
             }
         }
     }
-    
-    // API para armadilhas
+
     public void CatchRabbit(int index)
     {
         if (index >= 0 && index < maxRabbits)
@@ -728,13 +983,16 @@ public class FaunaManager : MonoBehaviour
             float gy = TerrainMeshGenerator.GetTerrainHeight(rabbitPosX[index], rabbitPosY[index]);
             if (LootManager.Instance != null)
             {
-                LootManager.Instance.DropItem(113, 1, new Vector3(rabbitPosX[index], gy + 0.2f, rabbitPosY[index]));
+                Vector3 dropAt = new Vector3(rabbitPosX[index], gy + 0.2f, rabbitPosY[index]);
+                LootManager.Instance.DropItem(113, 1, dropAt);
+                if (Random.value < 0.5f) LootManager.Instance.DropItem(120, 1, dropAt);
             }
-            rabbitPosX[index] = Random.Range(10f, 90f);
-            rabbitPosY[index] = Random.Range(10f, 90f);
+            GetMapBounds(out float minB, out float maxW, out float maxH);
+            rabbitPosX[index] = Random.Range(minB, maxW);
+            rabbitPosY[index] = Random.Range(minB, maxH);
         }
     }
-    
+
     public float[] GetRabbitPosX() { return rabbitPosX; }
     public float[] GetRabbitPosY() { return rabbitPosY; }
 

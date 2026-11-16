@@ -3,10 +3,9 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 
 /// <summary>
-/// Driver de calibracao atmosferica e iluminacao galega (The Forest AAA).
-/// Garante que a cena mantenha legibilidade noturna permanente com luz lunar prateada,
-/// cascatas de sombra suaves 2-split (mobile 60 FPS) e volume ACES tonemapping calibrado.
-/// Em Play Mode, respeita a autoridade do DayNightCycle caso este esteja ativo.
+/// Driver de calibração atmosférica e iluminação galega (The Forest AAA).
+/// Mantém legibilidade noturna com luz lunar prateada, sombras híbridas PC/Mobile
+/// e volume ACES tonemapping calibrado.
 /// </summary>
 [ExecuteAlways]
 public class GalicianAtmosphericLightingDriver : MonoBehaviour
@@ -17,7 +16,7 @@ public class GalicianAtmosphericLightingDriver : MonoBehaviour
     public UniversalRenderPipelineAsset urpAsset;
 
     [Header("Configuracao Lunar (Zero Breu Cego)")]
-    public Color moonLightColor = new Color(0.38f, 0.52f, 0.72f, 1.0f); // Luar prateado visível
+    public Color moonLightColor = new Color(0.38f, 0.52f, 0.72f, 1.0f);
     public float moonIntensity = 0.70f;
     public Color nightSkyAmbient = new Color(0.25f, 0.32f, 0.42f, 1.0f);
     public Color nightEquatorAmbient = new Color(0.18f, 0.24f, 0.30f, 1.0f);
@@ -27,9 +26,11 @@ public class GalicianAtmosphericLightingDriver : MonoBehaviour
     public Color daySunColor = new Color(0.92f, 0.94f, 0.98f, 1.0f);
     public float dayIntensity = 1.6f;
 
-    [Header("Cascatas de Sombra URP (Mobile 60 FPS)")]
+    [Header("Cascatas de Sombra URP (Mobile / PC)")]
     public float maxShadowDistance = 55.0f;
     public int shadowCascadeCount = 2;
+    public float pcMaxShadowDistance = 115.0f;
+    public int pcShadowCascadeCount = 4;
 
     [Header("Controle de Tempo e Modo")]
     public bool isNightTime = false;
@@ -58,7 +59,7 @@ public class GalicianAtmosphericLightingDriver : MonoBehaviour
 
         if (directionalLight == null)
         {
-            Light[] lights = FindObjectsByType<Light>(FindObjectsSortMode.None);
+            Light[] lights = FindObjectsByType<Light>();
             foreach (var l in lights)
             {
                 if (l.type == LightType.Directional && l.enabled)
@@ -71,7 +72,7 @@ public class GalicianAtmosphericLightingDriver : MonoBehaviour
 
         if (globalVolume == null)
         {
-            globalVolume = FindFirstObjectByType<Volume>();
+            globalVolume = FindAnyObjectByType<Volume>();
         }
 
         if (urpAsset == null)
@@ -82,14 +83,13 @@ public class GalicianAtmosphericLightingDriver : MonoBehaviour
 
     public void ApplyAtmosphericCalibration()
     {
-        // 1. Sombras URP Otimizadas para Mobile 60 FPS
         if (urpAsset != null)
         {
-            urpAsset.shadowDistance = maxShadowDistance;
-            urpAsset.shadowCascadeCount = shadowCascadeCount;
+            bool isMobile = Application.isMobilePlatform;
+            urpAsset.shadowDistance = isMobile ? maxShadowDistance : pcMaxShadowDistance;
+            urpAsset.shadowCascadeCount = isMobile ? shadowCascadeCount : pcShadowCascadeCount;
         }
 
-        // 2. Volume Global - ACES Tonemapping e Color Adjustments
         if (globalVolume != null && globalVolume.profile != null)
         {
             if (globalVolume.profile.TryGet(out Tonemapping tonemapping))
@@ -101,7 +101,7 @@ public class GalicianAtmosphericLightingDriver : MonoBehaviour
             if (globalVolume.profile.TryGet(out ColorAdjustments colorAdj))
             {
                 colorAdj.postExposure.overrideState = true;
-                colorAdj.postExposure.value = 0.35f; // Leve clareamento natural
+                colorAdj.postExposure.value = 0.35f;
                 colorAdj.contrast.overrideState = true;
                 colorAdj.contrast.value = 14f;
                 colorAdj.saturation.overrideState = true;
@@ -109,13 +109,11 @@ public class GalicianAtmosphericLightingDriver : MonoBehaviour
             }
         }
 
-        // Se DayNightCycle estiver ativo e em Play Mode, deixamos o ciclo de 24min controlar a luz e atmosfera
         if (Application.isPlaying && DayNightCycle.Instance != null)
         {
             return;
         }
 
-        // 3. Configuracao da Luz Direcional (fallback / edit mode)
         if (directionalLight != null)
         {
             if (isNightTime)
@@ -132,12 +130,11 @@ public class GalicianAtmosphericLightingDriver : MonoBehaviour
             }
         }
 
-        // 4. Luz Ambiente Trilight (Garante que silhuetas fiquem sempre legíveis)
         RenderSettings.ambientMode = AmbientMode.Trilight;
         RenderSettings.fog = true;
         RenderSettings.fogMode = FogMode.Linear;
-        RenderSettings.fogStartDistance = 40f;
-        RenderSettings.fogEndDistance = 280f;
+        RenderSettings.fogStartDistance = Application.isMobilePlatform ? 65f : 90f;
+        RenderSettings.fogEndDistance = Application.isMobilePlatform ? 390f : 580f;
 
         if (isNightTime)
         {

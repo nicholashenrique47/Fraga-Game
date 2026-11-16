@@ -26,7 +26,7 @@ public class FragaVisualOverhaul : EditorWindow
         RenderSettings.ambientLight = new Color(0.01f, 0.01f, 0.02f); // Quase breu
 
         // Lua Direcional Fria
-        Light[] lights = FindObjectsByType<Light>(FindObjectsSortMode.None);
+        Light[] lights = FindObjectsByType<Light>();
         Light dirLight = null;
         foreach(var l in lights)
         {

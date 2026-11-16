@@ -25,23 +25,24 @@ Material:
     serializedVersion: 3
     m_TexEnvs:
     - _BaseMap:
-        m_Texture: {fileID: 2800000, guid: 15646d3ac99529640b9226ab8c25eede, type: 2}
+        m_Texture: {fileID: 2800000, guid: 2df9c8d02e4087841983246e1142fdce, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _BumpMap:
-        m_Texture: {fileID: 2800000, guid: c92c88b3e81208244b0d435f395707b5, type: 2}
+        m_Texture: {fileID: 2800000, guid: 4627ecbb5c9be524fbfec415a930551f, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
-    - _BumpScale: 1.4
-    - _MossHeightCutoff: 2.4
-    - _MossHeightTransition: 0.8
+    - _BumpScale: 1.45
+    - _MossHeightCutoff: 2.2
+    - _MossHeightTransition: 1.1
     - _MossSmoothness: 0.08
-    - _Smoothness: 0.15
+    - _Smoothness: 0.14
+    - _WindSway: 0
     m_Colors:
-    - _BaseColor: {r: 0.45, g: 0.33, b: 0.2, a: 1}
-    - _MossColor: {r: 0.13, g: 0.28, b: 0.08, a: 1}
-    - _MossDirection: {r: 0, g: 0.3, b: 0.95, a: 0}
+    - _BaseColor: {r: 0.94, g: 0.9, b: 0.86, a: 1}
+    - _MossColor: {r: 0.15, g: 0.32, b: 0.1, a: 1}
+    - _MossDirection: {r: 0, g: 0.35, b: 0.94, a: 0}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

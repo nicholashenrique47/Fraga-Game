@@ -42,7 +42,13 @@ public class HubManager : MonoBehaviour
         Transform player = FindAnyObjectByType<PlayerController>()?.transform;
         if (player != null)
         {
-            player.position = new Vector3(50f, 1f, 50f);
+            GameManager gm = FindAnyObjectByType<GameManager>();
+            float cx = gm != null ? gm.mapWidth * 0.5f : FragaWorldBlueprint.CrashCampPos.x;
+            float cz = gm != null ? gm.mapHeight * 0.5f : FragaWorldBlueprint.CrashCampPos.y;
+            float cy = TerrainMeshGenerator.GetTerrainHeight(cx, cz) + 1.0f;
+            player.position = new Vector3(cx, cy, cz);
+            var pc = player.GetComponent<PlayerController>();
+            if (pc != null) pc.SnapToGround();
             
             SanitySystem sanity = player.GetComponent<SanitySystem>();
             if (sanity != null)

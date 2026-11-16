@@ -35,6 +35,11 @@ public class SantaCompanaSystem : MonoBehaviour
         if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
         audioSource.spatialBlend = 1f; // 3D sound
         audioSource.maxDistance = 30f;
+
+        if (meigaPrefab == null)
+        {
+            meigaPrefab = Resources.Load<GameObject>("Prefabs/Vulto_Prefab");
+        }
     }
 
     // Invocado pelo DayNightCycle nas horas de maior terror (ex: 03:00 AM)
@@ -42,8 +47,14 @@ public class SantaCompanaSystem : MonoBehaviour
     {
         if (processionTransform == null) return;
 
+        startPoint.y = TerrainMeshGenerator.GetTerrainHeight(startPoint.x, startPoint.z);
+        endPoint.y = TerrainMeshGenerator.GetTerrainHeight(endPoint.x, endPoint.z);
+
         processionTransform.position = startPoint;
-        Vector3 movementDirection = (endPoint - startPoint).normalized;
+        Vector3 movementDirection = endPoint - startPoint;
+        movementDirection.y = 0f;
+        if (movementDirection.sqrMagnitude < 0.001f) movementDirection = Vector3.forward;
+        movementDirection.Normalize();
         
         // Alinha os espiritos com o destino
         processionTransform.rotation = Quaternion.LookRotation(movementDirection);
@@ -69,23 +80,40 @@ public class SantaCompanaSystem : MonoBehaviour
 
         if (meigaInstances != null)
         {
-            foreach(var inst in meigaInstances) if (inst != null) Destroy(inst);
+            foreach (var inst in meigaInstances) if (inst != null) Destroy(inst);
         }
 
         meigaInstances = new GameObject[numberOfMeigas];
         for (int i = 0; i < numberOfMeigas; i++)
         {
             Vector3 offset = -processionTransform.forward * (i * spacing);
-            meigaInstances[i] = Instantiate(meigaPrefab, processionTransform.position + offset, processionTransform.rotation, processionTransform);
+            Vector3 spawnPos = processionTransform.position + offset;
+            spawnPos.y = TerrainMeshGenerator.GetTerrainHeight(spawnPos.x, spawnPos.z);
+            meigaInstances[i] = Instantiate(meigaPrefab, spawnPos, processionTransform.rotation, processionTransform);
+            foreach (Collider c in meigaInstances[i].GetComponentsInChildren<Collider>(true)) Destroy(c);
         }
     }
 
     private void Update()
     {
-        if (!isEventActive) return;
+        if (!isEventActive || processionTransform == null) return;
 
         // Avanco continuo e irrefreavel ignorando obstaculos fisicos (fantasmas)
         processionTransform.Translate(Vector3.forward * (speed * Time.deltaTime), Space.Self);
+        Vector3 p = processionTransform.position;
+        p.y = TerrainMeshGenerator.GetTerrainHeight(p.x, p.z);
+        processionTransform.position = p;
+
+        if (meigaInstances != null)
+        {
+            for (int i = 0; i < meigaInstances.Length; i++)
+            {
+                if (meigaInstances[i] == null) continue;
+                Vector3 mp = meigaInstances[i].transform.position;
+                mp.y = TerrainMeshGenerator.GetTerrainHeight(mp.x, mp.z);
+                meigaInstances[i].transform.position = mp;
+            }
+        }
 
         CheckPlayerProximityNative();
     }

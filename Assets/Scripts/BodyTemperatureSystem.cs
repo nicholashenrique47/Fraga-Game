@@ -1,17 +1,16 @@
 ﻿using UnityEngine;
 
 /// <summary>
-/// BodyTemperatureSystem: Termorregulação corporal realista, umidade das roupas e hipotermia atlântica.
-/// Mantém 37°C naturalmente durante o dia límpido em terra através do metabolismo basal.
-/// Hipotermia só ocorre durante noites gélidas sem abrigo/fogo, imersão em água fria ou sob chuvas severas prolongadas.
+/// BodyTemperatureSystem: Termorregulacao corporal, umidade das roupas e isolamento por equipamento termico.
+/// Zero-GC no Update (cache de GameManager e fogueiras fisicas BonfireEntity a 2 Hz).
 /// </summary>
 public class BodyTemperatureSystem : MonoBehaviour
 {
     public static BodyTemperatureSystem Instance { get; private set; }
 
     [Header("Temperature & Wetness")]
-    public float currentTemperature = 37.0f; // 37°C ideal
-    public float clothesWetness = 0.0f;      // 0 a 1 (100% encharcado)
+    public float currentTemperature = 37.0f;
+    public float clothesWetness = 0.0f;
 
     [Header("Hypothermia Tiers")]
     public const float TIER1_SHIVER_TEMP = 35.0f;
@@ -23,7 +22,14 @@ public class BodyTemperatureSystem : MonoBehaviour
     public GalicianWeatherEngine weatherEngine;
 
     private InventoryAdvanced inventoryCache;
+    private GameManager gmCache;
+    private BonfireEntity[] bonfireCache;
+    private float nextFireScanTime = 0f;
+    private float nextCacheRefreshTime = 0f;
+    private bool cachedNearFire = false;
     private float shiverTimer = 0f;
+    private int lastHypoTierAlert = 0;
+    private bool alertedWet = false;
 
     private void Awake()
     {
@@ -37,44 +43,48 @@ public class BodyTemperatureSystem : MonoBehaviour
         if (playerStatus == null) playerStatus = GetComponent<PlayerStatus>();
         if (playerStatus == null) playerStatus = FindAnyObjectByType<PlayerStatus>();
         if (weatherEngine == null) weatherEngine = FindAnyObjectByType<GalicianWeatherEngine>();
-        if (inventoryCache == null) inventoryCache = FindAnyObjectByType<InventoryAdvanced>();
+        if (inventoryCache == null) inventoryCache = InventoryAdvanced.Instance ?? FindAnyObjectByType<InventoryAdvanced>();
+        gmCache = FindAnyObjectByType<GameManager>();
     }
 
     private void Update()
     {
         bool isRaining = weatherEngine != null && weatherEngine.isRaining;
-        bool isNight = DayNightCycle.Instance != null ? DayNightCycle.Instance.IsNight() : false;
-        bool isNearFire = CheckNearCampfire();
-        bool hasAnimalFur = inventoryCache != null && inventoryCache.HasItem(105);
+        bool isNight = DayNightCycle.Instance != null && DayNightCycle.Instance.IsNight();
 
-        // 1. Acúmulo ou secagem de umidade nas roupas
+        if (Time.time >= nextFireScanTime)
+        {
+            nextFireScanTime = Time.time + 0.45f;
+            cachedNearFire = CheckNearCampfire();
+            if (playerStatus != null && cachedNearFire)
+            {
+                playerStatus.isNearBonfire = true;
+            }
+        }
+
+        bool isNearFire = cachedNearFire || (playerStatus != null && playerStatus.isNearBonfire);
+        float insulation = inventoryCache != null ? inventoryCache.GetColdInsulation() : 0f;
+
         if (isNearFire)
         {
-            // Seca roupas rapidamente próximo ao fogo
             clothesWetness = Mathf.Max(0f, clothesWetness - Time.deltaTime * 0.20f);
         }
         else if (isRaining)
         {
-            // Encharca gradualmente na chuva
-            clothesWetness = Mathf.Min(1.0f, clothesWetness + Time.deltaTime * 0.035f);
+            clothesWetness = Mathf.Min(1.0f, clothesWetness + Time.deltaTime * 0.035f * (1f - insulation * 0.5f));
         }
         else
         {
-            // Secagem natural ao ar (muito mais rápida com calor solar do dia)
             float dryRate = isNight ? 0.015f : 0.05f;
             clothesWetness = Mathf.Max(0f, clothesWetness - Time.deltaTime * dryRate);
         }
 
-        // 2. Termorregulação Corporal Realista
         if (isNearFire)
         {
-            // Próximo à fogueira: aquece confortavelmente até os 37°C
             currentTemperature = Mathf.Min(37.0f, currentTemperature + Time.deltaTime * 0.60f);
         }
         else if (!isNight && !isRaining)
         {
-            // Dia límpido e temperado na Galícia (18°C a 24°C):
-            // O metabolismo humano mantém e recupera a temperatura corporal normal de 37°C.
             if (currentTemperature < 37.0f)
             {
                 currentTemperature = Mathf.Min(37.0f, currentTemperature + Time.deltaTime * 0.25f);
@@ -82,20 +92,14 @@ public class BodyTemperatureSystem : MonoBehaviour
         }
         else if (isNight)
         {
-            // Noite fria atlântica: resfriamento gradual se desabrigado e sem fogo
-            float coolingRate = 0.012f + (clothesWetness * 0.035f);
-            if (hasAnimalFur)
-            {
-                coolingRate *= 0.35f; // Pele de animal reduz perda térmica em 65%
-            }
+            float coolingRate = (0.012f + clothesWetness * 0.035f) * (1f - insulation);
             currentTemperature = Mathf.Max(28.0f, currentTemperature - Time.deltaTime * coolingRate);
         }
         else if (isRaining)
         {
-            // Chuva diurna: só resfria se as roupas ficarem substancialmente molhadas
             if (clothesWetness > 0.4f)
             {
-                float wetCooling = (clothesWetness - 0.4f) * 0.008f;
+                float wetCooling = (clothesWetness - 0.4f) * 0.008f * (1f - insulation);
                 currentTemperature = Mathf.Max(33.0f, currentTemperature - Time.deltaTime * wetCooling);
             }
             else if (currentTemperature < 37.0f)
@@ -104,15 +108,43 @@ public class BodyTemperatureSystem : MonoBehaviour
             }
         }
 
-        // 3. Efeitos fisiológicos de Hipotermia
         HandleHypothermiaEffects();
     }
 
     private void HandleHypothermiaEffects()
     {
+        int hypoTier = 0;
+        if (currentTemperature <= TIER3_DAMAGE_TEMP) hypoTier = 3;
+        else if (currentTemperature <= TIER2_FATIGUE_TEMP) hypoTier = 2;
+        else if (currentTemperature <= TIER1_SHIVER_TEMP) hypoTier = 1;
+
+        if (hypoTier > lastHypoTierAlert && HUDSurvivalOverlay.Instance != null)
+        {
+            lastHypoTierAlert = hypoTier;
+            if (hypoTier == 1)
+                HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#77CCFF>Frio intenso! Aqueca-se na fogueira ou vista Casaco.</color>");
+            else if (hypoTier == 2)
+                HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#55AAFF>Hipotermia: Estamina limitada pelo frio!</color>");
+            else if (hypoTier == 3)
+                HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#FF5555>HIPOTERMIA SEVERA: Perdendo vida! Acenda fogo ou tome Cha!</color>");
+        }
+        else if (hypoTier == 0 && currentTemperature > 35.8f)
+        {
+            lastHypoTierAlert = 0;
+        }
+
+        if (clothesWetness >= 0.72f && !alertedWet && !cachedNearFire && HUDSurvivalOverlay.Instance != null)
+        {
+            alertedWet = true;
+            HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#66BBFF>Roupas encharcadas! Seque perto de uma fogueira.</color>");
+        }
+        else if (clothesWetness < 0.35f)
+        {
+            alertedWet = false;
+        }
+
         if (currentTemperature <= TIER1_SHIVER_TEMP)
         {
-            // Tremor involuntário na câmera (Dente batendo / Shivering)
             shiverTimer += Time.deltaTime * 18f;
             if (FirstPersonCamera.Instance != null)
             {
@@ -121,23 +153,23 @@ public class BodyTemperatureSystem : MonoBehaviour
             }
         }
 
-        if (currentTemperature <= TIER2_FATIGUE_TEMP)
+        if (currentTemperature <= TIER2_FATIGUE_TEMP && playerStatus != null)
         {
-            // Drena estamina do jogador e impede corrida
-            if (playerStatus != null)
-            {
-                playerStatus.stamina = Mathf.Min(playerStatus.stamina, 40f);
-            }
+            playerStatus.stamina = Mathf.Min(playerStatus.stamina, 40f);
         }
 
-        if (currentTemperature <= TIER3_DAMAGE_TEMP)
+        if (currentTemperature <= TIER3_DAMAGE_TEMP && playerStatus != null)
         {
-            // Dano de hipotermia atenuado (permite tempo hábil de sobrevivência para construir abrigo ou fogueira)
-            if (playerStatus != null)
-            {
-                playerStatus.TakeDamagePassive(0.40f * Time.deltaTime);
-            }
+            playerStatus.TakeDamagePassive(0.40f * Time.deltaTime);
         }
+    }
+
+    public void WarmUp(float deltaDegrees)
+    {
+        if (deltaDegrees <= 0f) return;
+        currentTemperature = Mathf.Min(37.5f, currentTemperature + deltaDegrees);
+        clothesWetness = Mathf.Max(0f, clothesWetness - deltaDegrees * 0.08f);
+        if (playerStatus != null) playerStatus.bodyTemperature = currentTemperature;
     }
 
     public void ResetTemperature()
@@ -145,17 +177,47 @@ public class BodyTemperatureSystem : MonoBehaviour
         currentTemperature = 37.0f;
         clothesWetness = 0.0f;
         shiverTimer = 0f;
+        lastHypoTierAlert = 0;
+        alertedWet = false;
     }
 
     private bool CheckNearCampfire()
     {
-        Collider[] hits = Physics.OverlapSphere(transform.position, 5.0f);
-        foreach (var c in hits)
+        if (Time.time >= nextCacheRefreshTime)
         {
-            string n = c.gameObject.name.ToLower();
-            if (n.Contains("campfire") || n.Contains("bonfire") || n.Contains("fogueira"))
+            nextCacheRefreshTime = Time.time + 1.5f;
+            bonfireCache = FindObjectsByType<BonfireEntity>();
+        }
+
+        if (bonfireCache != null)
+        {
+            Vector3 pos = transform.position;
+            for (int i = 0; i < bonfireCache.Length; i++)
             {
-                return true;
+                BonfireEntity bf = bonfireCache[i];
+                if (bf != null && bf.isLit && (bf.transform.position - pos).sqrMagnitude <= 25f)
+                {
+                    return true;
+                }
+            }
+        }
+
+        if (gmCache == null) gmCache = FindAnyObjectByType<GameManager>();
+        if (gmCache != null && gmCache.mapDataPtr != System.IntPtr.Zero)
+        {
+            int px = Mathf.RoundToInt(transform.position.x);
+            int pz = Mathf.RoundToInt(transform.position.z);
+
+            for (int x = px - 3; x <= px + 3; x++)
+            {
+                for (int z = pz - 3; z <= pz + 3; z++)
+                {
+                    if (x >= 0 && x < gmCache.mapWidth && z >= 0 && z < gmCache.mapHeight)
+                    {
+                        int tile = ResourceManager.GetMapCell(gmCache.mapDataPtr, gmCache.mapWidth, gmCache.mapHeight, x, z);
+                        if (tile == 4 || tile == 15) return true;
+                    }
+                }
             }
         }
         return false;

@@ -1,15 +1,9 @@
 using UnityEngine;
 
 /// <summary>
-/// Câmera em Primeira Pessoa AAA (The Forest Standard).
-/// Suporta:
-/// - Mouse Look suave no PC
-/// - Touch Look nativo no Celular (arraste com o dedo no lado direito da tela)
-/// - Headbobbing físico proporcional à velocidade real de caminhada/corrida
-/// - Transição suave de altura dos olhos ao agachar (1.75m -> 1.05m)
-/// - Tilt / Roll dinâmico ao esquivar para os lados (Strafing)
-/// - Dynamic FOV entre caminhada (65) e corrida (78)
-/// - Trava de cursor automática no PC com destrave via ESC
+/// Camera em Primeira Pessoa AAA (The Forest Standard).
+/// Suporta Mouse Look PC, Touch Look Mobile, Headbob proporcional, Dynamic FOV (incluindo zoom de arco)
+/// e bloqueio seguro de cursor sincronizado com FragaInputRouter.
 /// </summary>
 public class FirstPersonCamera : MonoBehaviour
 {
@@ -26,7 +20,6 @@ public class FirstPersonCamera : MonoBehaviour
     public float bottomClamp = 80f;
     public bool autoLockCursorOnPC = true;
 
-    // Propriedade mantida para retrocompatibilidade
     public float sensitivity { get { return mouseSensitivity; } set { mouseSensitivity = value; } }
 
     private float xRotation = 0f;
@@ -45,13 +38,15 @@ public class FirstPersonCamera : MonoBehaviour
 
     [Header("AAA Camera Polish")]
     public float baseFOV = 65f;
-    public float sprintFOV = 78f;
-    public float strafeTiltMax = 1.5f;
+    public float sprintFOV = 76f;
+    public float bowAimFOV = 52f;
+    public float strafeTiltMax = 1.6f;
 
     private float shakeIntensity = 0f;
     private float tiltAngle = 0f;
     private float targetTiltAngle = 0f;
     private float landingDipOffset = 0f;
+    private float customFOVOverride = -1f;
 
     public static FirstPersonCamera Instance;
 
@@ -60,6 +55,7 @@ public class FirstPersonCamera : MonoBehaviour
         Instance = this;
         cam = GetComponent<Camera>();
         if (cam != null) cam.fieldOfView = baseFOV;
+        ApplySavedSensitivity();
 
         if (playerBody == null && transform.parent != null)
         {
@@ -76,16 +72,16 @@ public class FirstPersonCamera : MonoBehaviour
 
     private void Start()
     {
+        ApplySavedSensitivity();
         transform.localPosition = new Vector3(0, currentEyeHeight, 0.15f);
 
-        // Trava cursor no PC se for desktop sem touch
-        if (autoLockCursorOnPC && Input.touchCount == 0 && (Application.platform == RuntimePlatform.WindowsPlayer || Application.platform == RuntimePlatform.WindowsEditor || Application.platform == RuntimePlatform.OSXPlayer || Application.platform == RuntimePlatform.OSXEditor || Application.platform == RuntimePlatform.LinuxPlayer))
+        if (autoLockCursorOnPC && Input.touchCount == 0 && IsDesktopPlatform() &&
+            (FragaInputRouter.Instance == null || !FragaInputRouter.Instance.IsTouchControlsActive))
         {
             Cursor.lockState = CursorLockMode.Locked;
             Cursor.visible = false;
         }
 
-        // Oculta malha do proprio corpo para evitar clipping na lente, preservando sombras
         if (playerBody != null)
         {
             Renderer[] rends = playerBody.GetComponentsInChildren<Renderer>();
@@ -97,9 +93,33 @@ public class FirstPersonCamera : MonoBehaviour
         }
     }
 
+    private static bool IsDesktopPlatform()
+    {
+        return Application.platform == RuntimePlatform.WindowsPlayer ||
+               Application.platform == RuntimePlatform.WindowsEditor ||
+               Application.platform == RuntimePlatform.OSXPlayer ||
+               Application.platform == RuntimePlatform.OSXEditor ||
+               Application.platform == RuntimePlatform.LinuxPlayer;
+    }
+
+    public void ApplySavedSensitivity()
+    {
+        mouseSensitivity = Mathf.Clamp(PlayerPrefs.GetFloat("Fraga_MouseSensitivity", 1.6f), 0.3f, 6.0f);
+        touchSensitivity = Mathf.Clamp(PlayerPrefs.GetFloat("Fraga_TouchSensitivity", 0.22f), 0.05f, 1.0f);
+    }
+
+    public void SetSensitivity(float newMouseSens, float newTouchSens)
+    {
+        mouseSensitivity = Mathf.Clamp(newMouseSens, 0.3f, 6.0f);
+        touchSensitivity = Mathf.Clamp(newTouchSens, 0.05f, 1.0f);
+        PlayerPrefs.SetFloat("Fraga_MouseSensitivity", mouseSensitivity);
+        PlayerPrefs.SetFloat("Fraga_TouchSensitivity", touchSensitivity);
+        PlayerPrefs.Save();
+    }
+
     public void AddShake(float intensity)
     {
-        shakeIntensity = Mathf.Min(shakeIntensity + intensity, 0.5f);
+        shakeIntensity = Mathf.Min(shakeIntensity + intensity, 0.45f);
     }
 
     public void SetTilt(float angle)
@@ -109,7 +129,22 @@ public class FirstPersonCamera : MonoBehaviour
 
     public void AddJumpImpulse()
     {
-        landingDipOffset = -0.04f;
+        landingDipOffset = -0.045f;
+    }
+
+    public void AddLandingDip(float impactSpeed)
+    {
+        float norm = Mathf.Clamp01((impactSpeed - 3.5f) / 10f);
+        landingDipOffset = Mathf.Min(landingDipOffset, -Mathf.Lerp(0.05f, 0.22f, norm));
+        if (norm > 0.25f)
+        {
+            AddShake(norm * 0.14f);
+        }
+    }
+
+    public void SetAimFOVOverride(float fovOrNegativeToClear)
+    {
+        customFOVOverride = fovOrNegativeToClear;
     }
 
     private void HandleHeadbobAndPolish()
@@ -125,14 +160,10 @@ public class FirstPersonCamera : MonoBehaviour
             isCrouching = playerController.isCrouching;
         }
 
-        // 1. Transicao suave de altura dos olhos ao agachar
         float targetHeight = isCrouching ? eyeHeightCrouching : eyeHeightStanding;
         currentEyeHeight = Mathf.Lerp(currentEyeHeight, targetHeight, Time.deltaTime * 8f);
-
-        // 2. Amortecimento de aterrissagem / salto
         landingDipOffset = Mathf.Lerp(landingDipOffset, 0f, Time.deltaTime * 6f);
 
-        // 3. Headbobbing fisico proporcional a velocidade real
         if (speed > 0.4f)
         {
             float currentBobSpeed = isSprinting ? bobSpeed * 1.35f : bobSpeed;
@@ -151,22 +182,21 @@ public class FirstPersonCamera : MonoBehaviour
             transform.localPosition = new Vector3(curX, curY, 0.15f);
         }
 
-        // 4. Dynamic FOV
         if (cam != null)
         {
-            float targetFOV = isSprinting ? sprintFOV : baseFOV;
-            cam.fieldOfView = Mathf.Lerp(cam.fieldOfView, targetFOV, Time.deltaTime * 5f);
+            float targetFOV = customFOVOverride > 0f ? customFOVOverride : (isSprinting ? sprintFOV : baseFOV);
+            cam.fieldOfView = Mathf.Lerp(cam.fieldOfView, targetFOV, Time.deltaTime * 6f);
         }
 
-        // 5. Decaimento de Camera Shake
         if (shakeIntensity > 0)
         {
-            shakeIntensity -= Time.deltaTime * 0.6f;
+            shakeIntensity -= Time.deltaTime * 0.7f;
             if (shakeIntensity < 0) shakeIntensity = 0;
         }
 
-        // 6. Strafe Tilt (Roll sutil ao andar de lado)
-        float horizontalInput = Input.GetAxisRaw("Horizontal");
+        float horizontalInput = FragaInputRouter.Instance != null
+            ? FragaInputRouter.Instance.MoveInput.x
+            : Input.GetAxisRaw("Horizontal");
         float strafeTilt = -horizontalInput * strafeTiltMax;
         tiltAngle = Mathf.Lerp(tiltAngle, targetTiltAngle + strafeTilt, Time.deltaTime * 5f);
     }
@@ -175,19 +205,33 @@ public class FirstPersonCamera : MonoBehaviour
     {
         if (playerBody == null) return;
 
-        // Suporte para travar cursor com clique e destravar com ESC no PC
-        if (Input.GetMouseButtonDown(0))
+        bool uiBlocking = SurvivalMapSystem.IsMapOpen ||
+                          (SurvivalInventoryCraftUI.Instance != null && SurvivalInventoryCraftUI.Instance.IsOpen) ||
+                          (RadialQuickSelectUI.Instance != null && RadialQuickSelectUI.Instance.IsOpen) ||
+                          (FragaOptionsMenu.Instance != null && FragaOptionsMenu.Instance.IsOpen) ||
+                          StorageChestInteractable.IsAnyChestOpen ||
+                          UIManager.IsEndgameModalOpen;
+
+        if (uiBlocking)
         {
-            if (UnityEngine.EventSystems.EventSystem.current == null || !UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject())
+            if (IsDesktopPlatform() && Cursor.lockState != CursorLockMode.None)
             {
-                if (Input.touchCount == 0)
-                {
-                    Cursor.lockState = CursorLockMode.Locked;
-                    Cursor.visible = false;
-                }
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+            }
+            return;
+        }
+
+        if (Input.GetMouseButtonDown(0) && Input.touchCount == 0 && IsDesktopPlatform())
+        {
+            if (!FragaInputRouter.IsAnyPointerOverUI())
+            {
+                Cursor.lockState = CursorLockMode.Locked;
+                Cursor.visible = false;
             }
         }
-        if (Input.GetKeyDown(KeyCode.Escape))
+
+        if (Input.GetKeyDown(KeyCode.Escape) && IsDesktopPlatform())
         {
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;
@@ -196,7 +240,6 @@ public class FirstPersonCamera : MonoBehaviour
         Vector2 lookDelta = Vector2.zero;
         bool isTouch = false;
 
-        // 1. Tenta pegar do painel dedicado CameraTouchController se houver
         if (touchController != null)
         {
             Vector2 tDelta = touchController.GetTouchDelta();
@@ -207,35 +250,27 @@ public class FirstPersonCamera : MonoBehaviour
             }
         }
 
-        // 2. Toque Nativo: varre qualquer toque no lado direito da tela (fora da área do joystick)
         if (!isTouch && Input.touchCount > 0)
         {
             for (int i = 0; i < Input.touchCount; i++)
             {
                 Touch t = Input.GetTouch(i);
-                // Ignora toques sobre botoes e elementos de UI da interface
-                if (UnityEngine.EventSystems.EventSystem.current != null && UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject(t.fingerId))
-                {
+                if (UnityEngine.EventSystems.EventSystem.current != null &&
+                    UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject(t.fingerId))
                     continue;
-                }
 
-                // Lado direito da tela (48% em diante)
-                if (t.position.x > Screen.width * 0.48f)
+                if (t.position.x > Screen.width * 0.48f && t.phase == TouchPhase.Moved)
                 {
-                    if (t.phase == TouchPhase.Moved)
-                    {
-                        lookDelta = t.deltaPosition * touchSensitivity;
-                        isTouch = true;
-                        break;
-                    }
+                    lookDelta = t.deltaPosition * touchSensitivity;
+                    isTouch = true;
+                    break;
                 }
             }
         }
 
-        // 3. Fallback Mouse no PC
         if (!isTouch)
         {
-            if (Cursor.lockState == CursorLockMode.Locked || Input.GetMouseButton(0) || Input.GetMouseButton(1))
+            if (Cursor.lockState == CursorLockMode.Locked || Input.GetMouseButton(1))
             {
                 float rawMouseX = Input.GetAxisRaw("Mouse X");
                 float rawMouseY = Input.GetAxisRaw("Mouse Y");
@@ -243,24 +278,16 @@ public class FirstPersonCamera : MonoBehaviour
             }
         }
 
-        // Suavizacao
         smoothedLookDelta = Vector2.Lerp(smoothedLookDelta, lookDelta, Time.deltaTime * 30f);
 
-        float rotX = smoothedLookDelta.x;
-        float rotY = smoothedLookDelta.y;
-
-        xRotation -= rotY;
+        xRotation -= smoothedLookDelta.y;
         xRotation = Mathf.Clamp(xRotation, topClamp, bottomClamp);
 
-        // Shake offset
         float shakeX = Random.Range(-1f, 1f) * shakeIntensity;
         float shakeY = Random.Range(-1f, 1f) * shakeIntensity;
 
-        // Rodar câmera cima/baixo + Tilt lateral + Shake
         transform.localRotation = Quaternion.Euler(xRotation + shakeY, 0f, tiltAngle + shakeX);
-
-        // Rodar corpo do jogador esquerda/direita
-        playerBody.Rotate(Vector3.up * rotX);
+        playerBody.Rotate(Vector3.up * smoothedLookDelta.x);
 
         HandleHeadbobAndPolish();
     }

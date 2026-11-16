@@ -16,6 +16,7 @@ public class AdvancedSkyboxSystem : MonoBehaviour
     private ParticleSystem starParticles;
     private GameObject moonObject;
     private Material skyboxMat;
+    private Texture2D softGlowFallback;
 
     private void Start()
     {
@@ -28,13 +29,42 @@ public class AdvancedSkyboxSystem : MonoBehaviour
     private ParticleSystem auroraParticles;
     public PlayerStatus playerStatusRef; // Para verificar temperatura
 
+    private Texture2D LoadParticleTexture(string resourceName)
+    {
+        Texture2D tex = Resources.Load<Texture2D>("Textures/" + resourceName);
+        if (tex != null) return tex;
+
+        if (softGlowFallback == null)
+        {
+            const int size = 64;
+            softGlowFallback = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            softGlowFallback.wrapMode = TextureWrapMode.Clamp;
+            Color[] px = new Color[size * size];
+            float half = (size - 1) * 0.5f;
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float dx = (x - half) / half;
+                    float dy = (y - half) / half;
+                    float d = Mathf.Clamp01(Mathf.Sqrt(dx * dx + dy * dy));
+                    float a = Mathf.Pow(1f - d, 2.2f);
+                    px[y * size + x] = new Color(1f, 1f, 1f, a);
+                }
+            }
+            softGlowFallback.SetPixels(px);
+            softGlowFallback.Apply();
+        }
+        return softGlowFallback;
+    }
+
     private void CreateSkybox()
     {
         // Tenta carregar o skybox procedural (gradiente)
         skyboxMat = new Material(Shader.Find("Skybox/Procedural"));
         if (skyboxMat == null || skyboxMat.shader == null || skyboxMat.shader.name == "Hidden/InternalErrorShader")
         {
-            // Fallback para cor sÃ³lida
+            // Fallback para cor sólida
             skyboxMat = new Material(Shader.Find("Skybox/Solid Color"));
             if (skyboxMat.shader == null) skyboxMat = new Material(Shader.Find("Standard"));
         }
@@ -46,7 +76,7 @@ public class AdvancedSkyboxSystem : MonoBehaviour
             skyboxMat.SetFloat("_AtmosphereThickness", 1.2f);
             skyboxMat.SetFloat("_Exposure", 1.35f);
         }
-        
+
         RenderSettings.skybox = skyboxMat;
         DynamicGI.UpdateEnvironment();
 
@@ -105,12 +135,17 @@ public class AdvancedSkyboxSystem : MonoBehaviour
         );
         colorOverLifetime.color = g;
 
-        // Renderer
+        // Renderer com textura suave (sem quadrados)
         var renderer = auroraParticles.GetComponent<ParticleSystemRenderer>();
         Material auroraMat = new Material(Shader.Find("Universal Render Pipeline/Particles/Unlit"));
         if (auroraMat.shader == null) auroraMat = new Material(Shader.Find("Particles/Standard Unlit"));
-        auroraMat.color = new Color(0.2f, 0.8f, 0.4f, 0.04f);
+        Texture2D mistTex = LoadParticleTexture("soft_mist_puff");
+        auroraMat.SetTexture("_BaseMap", mistTex);
+        auroraMat.mainTexture = mistTex;
+        auroraMat.SetColor("_BaseColor", new Color(0.2f, 0.8f, 0.4f, 0.06f));
+        auroraMat.color = new Color(0.2f, 0.8f, 0.4f, 0.06f);
         auroraMat.SetFloat("_Surface", 1);
+        auroraMat.SetInt("_ZWrite", 0);
         auroraMat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
         auroraMat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.One); // Additive blending
         auroraMat.renderQueue = 2900;
@@ -131,8 +166,8 @@ public class AdvancedSkyboxSystem : MonoBehaviour
         main.loop = true;
         main.startLifetime = 10f; // Long lifetime
         main.startSpeed = 0f; // Fixed position
-        main.startSize = new ParticleSystem.MinMaxCurve(0.1f, 0.3f);
-        main.startColor = new Color(1f, 1f, 1f, 0.8f);
+        main.startSize = new ParticleSystem.MinMaxCurve(0.25f, 0.65f);
+        main.startColor = new Color(0.95f, 0.97f, 1f, 0.85f);
         main.maxParticles = 800;
         main.simulationSpace = ParticleSystemSimulationSpace.World;
         main.prewarm = true;
@@ -151,11 +186,11 @@ public class AdvancedSkyboxSystem : MonoBehaviour
         Gradient grad = new Gradient();
         grad.SetKeys(
             new GradientColorKey[] { new GradientColorKey(Color.white, 0f) },
-            new GradientAlphaKey[] { 
-                new GradientAlphaKey(0f, 0f), 
-                new GradientAlphaKey(1f, 0.2f), 
-                new GradientAlphaKey(1f, 0.8f), 
-                new GradientAlphaKey(0f, 1f) 
+            new GradientAlphaKey[] {
+                new GradientAlphaKey(0f, 0f),
+                new GradientAlphaKey(1f, 0.2f),
+                new GradientAlphaKey(1f, 0.8f),
+                new GradientAlphaKey(0f, 1f)
             }
         );
         colorOverLifetime.color = grad;
@@ -163,6 +198,16 @@ public class AdvancedSkyboxSystem : MonoBehaviour
         var renderer = starParticles.GetComponent<ParticleSystemRenderer>();
         Material starMat = new Material(Shader.Find("Universal Render Pipeline/Particles/Unlit"));
         if (starMat.shader == null) starMat = new Material(Shader.Find("Particles/Standard Unlit"));
+        Texture2D glowTex = LoadParticleTexture("soft_particle_glow");
+        starMat.SetTexture("_BaseMap", glowTex);
+        starMat.mainTexture = glowTex;
+        starMat.SetColor("_BaseColor", Color.white);
+        starMat.color = Color.white;
+        starMat.SetFloat("_Surface", 1);
+        starMat.SetInt("_ZWrite", 0);
+        starMat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+        starMat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.One);
+        starMat.renderQueue = 2950;
         renderer.material = starMat;
         renderer.renderMode = ParticleSystemRenderMode.Billboard;
     }
@@ -173,15 +218,22 @@ public class AdvancedSkyboxSystem : MonoBehaviour
         moonObject.name = "VFX_Moon";
         moonObject.transform.SetParent(transform);
         moonObject.transform.localScale = new Vector3(20f, 20f, 20f);
-        
+
         Destroy(moonObject.GetComponent<Collider>());
-        
+
         Material moonMat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
-        if (moonMat.shader == null) moonMat = new Material(Shader.Find("Unlit/Color"));
-        
-        moonMat.color = new Color(0.95f, 0.95f, 1f); // Branco luar
+        if (moonMat.shader == null) moonMat = new Material(Shader.Find("Unlit/Texture"));
+
+        Texture2D moonTex = Resources.Load<Texture2D>("Textures/moon_surface_albedo");
+        if (moonTex != null)
+        {
+            moonMat.SetTexture("_BaseMap", moonTex);
+            moonMat.mainTexture = moonTex;
+        }
+        moonMat.SetColor("_BaseColor", new Color(0.95f, 0.96f, 1f));
+        moonMat.color = new Color(0.95f, 0.96f, 1f); // Branco luar com crateras
         moonObject.GetComponent<Renderer>().material = moonMat;
-        
+
         // Moon Light
         Light moonLight = moonObject.AddComponent<Light>();
         moonLight.type = LightType.Point;
@@ -194,12 +246,12 @@ public class AdvancedSkyboxSystem : MonoBehaviour
     private void Update()
     {
         if (dayNightCycle == null) return;
-        
+
         float time = dayNightCycle.currentTime; // 0 to 24
 
         // 1. Atualizar Skybox Color
         Color targetColor = daySkyColor;
-        
+
         if (time >= 4f && time < 8f) // Dawn
         {
             float t = (time - 4f) / 4f; // 0 to 1
@@ -227,8 +279,8 @@ public class AdvancedSkyboxSystem : MonoBehaviour
         {
             if (skyboxMat.HasProperty("_Color")) skyboxMat.SetColor("_Color", targetColor);
             if (skyboxMat.HasProperty("_Tint")) skyboxMat.SetColor("_Tint", targetColor);
-            
-            // Skybox Procedural: Ajustar atmosfera e exposiÃ§Ã£o dinamicamente
+
+            // Skybox Procedural: Ajustar atmosfera e exposição dinamicamente
             if (skyboxMat.HasProperty("_AtmosphereThickness"))
             {
                 float thickness = isNight ? 0.4f : 1.2f;
@@ -248,7 +300,7 @@ public class AdvancedSkyboxSystem : MonoBehaviour
         {
             if (isNight && !starParticles.isPlaying) starParticles.Play();
             else if (!isNight && starParticles.isPlaying) starParticles.Stop();
-            
+
             // Fixar estrelas ao centro do jogador mas sem rodar
             if (playerTransform != null)
             {
@@ -262,16 +314,17 @@ public class AdvancedSkyboxSystem : MonoBehaviour
             if (isNight)
             {
                 if (!moonObject.activeSelf) moonObject.SetActive(true);
-                
+
                 // Calcula posicao da lua baseada no tempo (arco noturno Leste -> Oeste)
                 float nightProgress = 0f;
-                if (time >= 19f) nightProgress = (time - 19f) / 10f; 
+                if (time >= 19f) nightProgress = (time - 19f) / 10f;
                 else if (time < 5f) nightProgress = (time + 5f) / 10f;
 
                 float angle = Mathf.Lerp(0f, Mathf.PI, nightProgress);
                 // Arco no ceu (Z = Leste/Oeste, Y = Cima)
                 Vector3 moonOffset = new Vector3(100f, Mathf.Sin(angle) * 150f, Mathf.Cos(angle) * 150f);
                 moonObject.transform.position = playerTransform.position + moonOffset;
+                moonObject.transform.LookAt(playerTransform);
             }
             else
             {
@@ -287,10 +340,10 @@ public class AdvancedSkyboxSystem : MonoBehaviour
     {
         if (auroraParticles == null || playerTransform == null) return;
 
-        // Aurora aparece em noites quando a temperatura Ã© baixa
+        // Aurora aparece em noites quando a temperatura é baixa
         bool shouldShowAurora = isNight;
 
-        // Se tivermos referÃªncia ao PlayerStatus, verificar temperatura
+        // Se tivermos referência ao PlayerStatus, verificar temperatura
         if (playerStatusRef != null)
         {
             shouldShowAurora = isNight && playerStatusRef.bodyTemperature < 35f;
@@ -299,7 +352,7 @@ public class AdvancedSkyboxSystem : MonoBehaviour
         if (shouldShowAurora)
         {
             if (!auroraParticles.isPlaying) auroraParticles.Play();
-            // Posicionar a aurora no cÃ©u acima do jogador
+            // Posicionar a aurora no céu acima do jogador
             auroraParticles.transform.position = playerTransform.position + new Vector3(0, 120f, 50f);
         }
         else
@@ -308,4 +361,3 @@ public class AdvancedSkyboxSystem : MonoBehaviour
         }
     }
 }
-

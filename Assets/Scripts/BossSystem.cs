@@ -42,34 +42,89 @@ public class BossSystem : MonoBehaviour
     private void Start()
     {
         currentHealth = maxHealth;
+        if (playerTransform == null && PlayerController.Instance != null)
+            playerTransform = PlayerController.Instance.transform;
+        if (vultoManager == null) vultoManager = VultoManager.Instance ?? FindAnyObjectByType<VultoManager>();
+        if (dayNightCycle == null) dayNightCycle = DayNightCycle.Instance ?? FindAnyObjectByType<DayNightCycle>();
+        if (sanitySystem == null) sanitySystem = FindAnyObjectByType<SanitySystem>();
+        if (audioManager == null) audioManager = AudioManager.Instance ?? FindAnyObjectByType<AudioManager>();
     }
-    
+
     public void SpawnBoss(Vector3 position)
     {
         if (IsActive) return;
         
+        GameManager gm = FindAnyObjectByType<GameManager>();
+        if (gm != null)
+        {
+            position.x = Mathf.Clamp(position.x, 8f, Mathf.Max(16f, gm.mapWidth - 8f));
+            position.z = Mathf.Clamp(position.z, 8f, Mathf.Max(16f, gm.mapHeight - 8f));
+        }
+        position.y = TerrainMeshGenerator.GetTerrainHeight(position.x, position.z);
+
         GameObject prefab = Resources.Load<GameObject>("Prefabs/Boss_Prefab");
         if (prefab != null)
         {
             bossInstance = Instantiate(prefab, position, Quaternion.identity, transform);
-            state = BossState.Chasing;
-            currentHealth = maxHealth;
-            
-            summonTimer = 5f;
-            aoeTimer = 10f;
-            
-            Debug.LogWarning("[BossSystem] O VULTO ANCIÃO DESPERTOU!");
-            
-            // UI alert
-            UIManager ui = FindAnyObjectByType<UIManager>();
-            if (ui != null) ui.SetLootTooltip("O Ancião Despertou...");
-            
-            // Haptic
-            HapticManager haptic = FindAnyObjectByType<HapticManager>();
-            if (haptic != null) haptic.TriggerHeavyVibration();
-            
-            if (audioManager != null) audioManager.PlayMusic(bossMusicClip);
         }
+        else
+        {
+            bossInstance = CreateProceduralBoss(position);
+        }
+
+        state = BossState.Chasing;
+        currentHealth = maxHealth;
+        summonTimer = 5f;
+        aoeTimer = 10f;
+
+        Debug.LogWarning("[BossSystem] O VULTO ANCIAO DESPERTOU!");
+
+        if (HUDSurvivalOverlay.Instance != null)
+            HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#FF4466>O VULTO ANCIAO DESPERTOU DAS SOMBRAS!</color>");
+        else
+        {
+            UIManager ui = FindAnyObjectByType<UIManager>();
+            if (ui != null) ui.SetLootTooltip("O Anciao Despertou...");
+        }
+
+        HapticManager haptic = FindAnyObjectByType<HapticManager>();
+        if (haptic != null) haptic.TriggerHeavyVibration();
+        if (audioManager != null && bossMusicClip != null) audioManager.PlayMusic(bossMusicClip);
+        else if (audioManager != null) audioManager.PlayNightHorror();
+    }
+
+    private GameObject CreateProceduralBoss(Vector3 pos)
+    {
+        GameObject root = new GameObject("ElderVulto_Boss");
+        root.transform.SetParent(transform, false);
+        root.transform.position = pos;
+
+        CapsuleCollider col = root.AddComponent<CapsuleCollider>();
+        col.center = new Vector3(0f, 1.8f, 0f);
+        col.radius = 0.85f;
+        col.height = 3.6f;
+
+        Shader lit = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
+        Material darkMat = new Material(lit);
+        darkMat.color = new Color(0.08f, 0.06f, 0.10f);
+        Material glowMat = new Material(Shader.Find("Universal Render Pipeline/Unlit") ?? lit);
+        glowMat.color = new Color(0.85f, 0.16f, 0.28f);
+
+        GameObject torso = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+        Destroy(torso.GetComponent<Collider>());
+        torso.transform.SetParent(root.transform, false);
+        torso.transform.localPosition = new Vector3(0f, 1.75f, 0f);
+        torso.transform.localScale = new Vector3(1.15f, 1.65f, 0.95f);
+        torso.GetComponent<Renderer>().sharedMaterial = darkMat;
+
+        GameObject core = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        Destroy(core.GetComponent<Collider>());
+        core.transform.SetParent(root.transform, false);
+        core.transform.localPosition = new Vector3(0f, 2.0f, 0.35f);
+        core.transform.localScale = new Vector3(0.42f, 0.42f, 0.42f);
+        core.GetComponent<Renderer>().sharedMaterial = glowMat;
+
+        return root;
     }
     
     public AudioManager audioManager;
@@ -77,10 +132,16 @@ public class BossSystem : MonoBehaviour
     
     private void Update()
     {
+        if (playerTransform == null && PlayerController.Instance != null)
+            playerTransform = PlayerController.Instance.transform;
+        if (playerTransform == null) return;
+
         // Spawns automatically on Day 5 night
         if (state == BossState.Dormant && dayNightCycle != null)
         {
-            if (dayNightCycle.currentDay >= 5 && dayNightCycle.currentTime >= 20f)
+            bool caveAwaken = dayNightCycle.IsNight() &&
+                Vector2.Distance(new Vector2(playerTransform.position.x, playerTransform.position.z), FragaWorldBlueprint.SacredCavePos) < 15f;
+            if ((dayNightCycle.currentDay >= 5 && dayNightCycle.currentTime >= 20f) || caveAwaken)
             {
                 // Spawn near player
                 Vector3 spawnPos = playerTransform.position + new Vector3(Random.Range(-15f, 15f), 0, Random.Range(-15f, 15f));
@@ -124,10 +185,16 @@ public class BossSystem : MonoBehaviour
         // Move towards player
         if (distToPlayer > meleeRange)
         {
-            bossInstance.transform.position += dirToPlayer.normalized * moveSpeed * Time.deltaTime;
+            Vector3 nextPos = bossInstance.transform.position + dirToPlayer.normalized * moveSpeed * Time.deltaTime;
+            nextPos.y = TerrainMeshGenerator.GetTerrainHeight(nextPos.x, nextPos.z);
+            bossInstance.transform.position = nextPos;
         }
         else
         {
+            Vector3 curPos = bossInstance.transform.position;
+            curPos.y = TerrainMeshGenerator.GetTerrainHeight(curPos.x, curPos.z);
+            bossInstance.transform.position = curPos;
+
             // Melee Attack
             attackTimer -= Time.deltaTime;
             if (attackTimer <= 0)
@@ -233,6 +300,7 @@ public class BossSystem : MonoBehaviour
     {
         aoeIndicator = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
         Destroy(aoeIndicator.GetComponent<Collider>());
+        pos.y = TerrainMeshGenerator.GetTerrainHeight(pos.x, pos.z);
         aoeIndicator.transform.position = pos + new Vector3(0, 0.1f, 0);
         aoeIndicator.transform.localScale = new Vector3(aoeRadius * 2f, 0.05f, aoeRadius * 2f);
         
@@ -255,6 +323,10 @@ public class BossSystem : MonoBehaviour
         if (!IsActive) return;
         
         currentHealth -= amount;
+        if (HUDSurvivalOverlay.Instance != null && currentHealth > 0f)
+        {
+            HUDSurvivalOverlay.Instance.ShowLootTooltip($"Vulto Anciao: {Mathf.CeilToInt(currentHealth)}/{Mathf.RoundToInt(maxHealth)} HP");
+        }
         
         // Blink red
         Renderer[] renderers = bossInstance.GetComponentsInChildren<Renderer>();
@@ -287,8 +359,13 @@ public class BossSystem : MonoBehaviour
             LootManager.Instance.DropItem(115, 1, bossInstance.transform.position);
         }
         
-        UIManager ui = FindAnyObjectByType<UIManager>();
-        if (ui != null) ui.SetLootTooltip("O VULTO ANCIÃO FOI DERROTADO!");
+        if (HUDSurvivalOverlay.Instance != null)
+            HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#55FFAA>O VULTO ANCIAO FOI DERROTADO! Pegue o Coracao Sombrio.</color>");
+        else
+        {
+            UIManager ui = FindAnyObjectByType<UIManager>();
+            if (ui != null) ui.SetLootTooltip("O VULTO ANCIAO FOI DERROTADO!");
+        }
         
         Destroy(bossInstance);
         

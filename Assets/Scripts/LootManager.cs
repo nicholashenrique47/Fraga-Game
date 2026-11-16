@@ -15,25 +15,26 @@ public class LootManager : MonoBehaviour
     [Header("Rendering (Mesh Instancing)")]
     public Mesh sackMesh;
     public Material sackMaterial;
-    
+
     [Header("Interaction")]
     public float pickupRadius = 2.5f;
     public Transform playerTransform;
     public InventoryAdvanced inventory;
 
-    private List<DroppedItem> droppedItems = new List<DroppedItem>();
-    private Matrix4x4[] renderMatrices = new Matrix4x4[1023]; // Limite do GPU Instancing por batch
+    private readonly List<DroppedItem> droppedItems = new List<DroppedItem>();
+    private readonly Matrix4x4[] renderMatrices = new Matrix4x4[1023]; // Limite do GPU Instancing por batch
 
-    // Pseudo-Singleton para chamadas rapidas do C#
     public static LootManager Instance;
     private UIManager uiCache;
+    private AudioManager audioCache;
+    private bool hadNearbyTooltip = false;
 
     private void Awake()
     {
         Instance = this;
         uiCache = FindAnyObjectByType<UIManager>();
+        audioCache = AudioManager.Instance ?? FindAnyObjectByType<AudioManager>();
 
-        // Se nao for fornecido um mesh, cria um saco de serapilheira simples
         if (sackMesh == null)
         {
             GameObject tempCube = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -43,16 +44,25 @@ public class LootManager : MonoBehaviour
 
         if (sackMaterial == null)
         {
-            sackMaterial = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+            sackMaterial = new Material(Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard"));
             sackMaterial.color = new Color(0.6f, 0.4f, 0.2f);
             sackMaterial.enableInstancing = true;
         }
     }
 
+    private void Start()
+    {
+        if (playerTransform == null && PlayerController.Instance != null)
+            playerTransform = PlayerController.Instance.transform;
+        if (inventory == null)
+            inventory = InventoryAdvanced.Instance ?? FindAnyObjectByType<InventoryAdvanced>();
+    }
+
     /// Larga um item no chao do mapa (Ex: Cervo morto, ou dropar do inventario)
     public void DropItem(int itemID, int amount, Vector3 pos)
     {
-        if (droppedItems.Count >= 1023) 
+        if (amount <= 0) return;
+        if (droppedItems.Count >= 1023)
         {
             Debug.LogWarning("[LootManager] Maximo de itens no chao atingido.");
             return;
@@ -61,20 +71,17 @@ public class LootManager : MonoBehaviour
         DroppedItem drop = new DroppedItem();
         drop.itemID = itemID;
 
-        // Adiciona alguma variancia na posicao para nao colidirem todos no mesmo ponto exato
         Vector3 randomOffset = new Vector3(Random.Range(-0.5f, 0.5f), 0.2f, Random.Range(-0.5f, 0.5f));
         drop.position = pos + randomOffset;
-        
-        // Rotacao aleatoria e escala pequena para simular um "Drop"
+
         Quaternion rot = Quaternion.Euler(0f, Random.Range(0f, 360f), 0f);
         drop.matrix = Matrix4x4.TRS(drop.position, rot, Vector3.one * 0.4f);
 
-        // Se for uma stack inteira (ex: 3 peles), adiciona multiplos (para simplificar, criamos multiplas instnacias visuais)
-        for(int i=0; i<amount; i++)
+        for (int i = 0; i < amount; i++)
         {
+            if (droppedItems.Count >= 1023) break;
             droppedItems.Add(drop);
-            // Re-offset para o proximo do mesmo batch
-            drop.position += new Vector3(Random.Range(-0.2f, 0.2f), 0, Random.Range(-0.2f, 0.2f));
+            drop.position += new Vector3(Random.Range(-0.2f, 0.2f), 0f, Random.Range(-0.2f, 0.2f));
             drop.matrix = Matrix4x4.TRS(drop.position, rot, Vector3.one * 0.4f);
         }
 
@@ -84,65 +91,86 @@ public class LootManager : MonoBehaviour
     private void Update()
     {
         RenderLoot();
-        
-        // Scan para apanhar se o jogador estiver perto (Apenas 1 por frame para nao travar)
         TryPickupNearby();
     }
 
     private void TryPickupNearby()
     {
-        if (playerTransform == null || inventory == null || droppedItems.Count == 0) return;
+        if (playerTransform == null && PlayerController.Instance != null)
+            playerTransform = PlayerController.Instance.transform;
+        if (inventory == null)
+            inventory = InventoryAdvanced.Instance;
 
-        // Otimizacao: Só verifica se houver movimento ou a cada N frames
+        if (playerTransform == null || inventory == null || droppedItems.Count == 0)
+        {
+            if (hadNearbyTooltip && uiCache != null)
+            {
+                uiCache.SetLootTooltip("");
+                hadNearbyTooltip = false;
+            }
+            return;
+        }
+
         if (Time.frameCount % 5 != 0) return;
 
         Vector3 pPos = playerTransform.position;
         float radiusSq = pickupRadius * pickupRadius;
-        float tooltipRadiusSq = (pickupRadius * 2f) * (pickupRadius * 2f); // Raio de aviso visual
+        float tooltipRadiusSq = (pickupRadius * 2f) * (pickupRadius * 2f);
 
         float closestDistSq = float.MaxValue;
         int closestItemID = -1;
+        bool pickedUpAny = false;
 
         for (int i = droppedItems.Count - 1; i >= 0; i--)
         {
             Vector3 diff = droppedItems[i].position - pPos;
             float distSq = diff.sqrMagnitude;
 
-            // Logica do Tooltip: Guardar o mais proximo
             if (distSq < tooltipRadiusSq && distSq < closestDistSq)
             {
                 closestDistSq = distSq;
                 closestItemID = droppedItems[i].itemID;
             }
 
-            // Logica de Pickup
             if (distSq <= radiusSq)
             {
-                // Tenta adicionar ao inventario
-                int leftover = inventory.AddItem(droppedItems[i].itemID, 1);
-                
+                int itemId = droppedItems[i].itemID;
+                int leftover = inventory.AddItem(itemId, 1);
+
                 if (leftover == 0)
                 {
-                    // Sucesso a apanhar
-                    Debug.Log($"[LootManager] Apanhou {ItemDatabase.GetItem(droppedItems[i].itemID).itemName}");
+                    ItemData pickedData = ItemDatabase.GetItem(itemId);
+                    string msg = $"+1 {(pickedData != null ? pickedData.itemName : "Item")}";
+
+                    if (audioCache == null) audioCache = AudioManager.Instance;
+                    if (audioCache != null) audioCache.PlayPickupSound();
+
+                    if (HUDSurvivalOverlay.Instance != null)
+                        HUDSurvivalOverlay.Instance.ShowLootTooltip(msg);
+                    else if (uiCache != null)
+                        uiCache.SetLootTooltip(msg);
+
                     droppedItems.RemoveAt(i);
                     UpdateMatrices();
-                    break; // Apanha 1 por tick para gerar satisfacao e som fluido
+                    pickedUpAny = true;
+                    hadNearbyTooltip = false;
+                    break;
                 }
             }
         }
 
-        // --- PREMIUM AAA: Tooltip Dinamico no UI ---
-        if (uiCache != null)
+        if (!pickedUpAny && uiCache != null)
         {
             if (closestItemID != -1)
             {
                 ItemData data = ItemDatabase.GetItem(closestItemID);
                 uiCache.SetLootTooltip(data != null ? $"[ {data.itemName} ]" : "");
+                hadNearbyTooltip = true;
             }
-            else
+            else if (hadNearbyTooltip)
             {
-                uiCache.SetLootTooltip(""); // Limpar
+                uiCache.SetLootTooltip("");
+                hadNearbyTooltip = false;
             }
         }
     }
@@ -160,7 +188,7 @@ public class LootManager : MonoBehaviour
         if (droppedItems.Count > 0 && sackMesh != null && sackMaterial != null)
         {
             Graphics.DrawMeshInstanced(sackMesh, 0, sackMaterial, renderMatrices, droppedItems.Count,
-                null, UnityEngine.Rendering.ShadowCastingMode.On, false, 0, null, 
+                null, UnityEngine.Rendering.ShadowCastingMode.On, false, 0, null,
                 UnityEngine.Rendering.LightProbeUsage.Off);
         }
     }

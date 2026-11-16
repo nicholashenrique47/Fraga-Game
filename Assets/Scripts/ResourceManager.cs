@@ -1,9 +1,72 @@
 using UnityEngine;
 using System.Runtime.InteropServices;
 
+public class MineableRockNode : MonoBehaviour
+{
+    public Vector2Int gridKey;
+    public int tileID = 8;
+    public bool isPermanent = false;
+    public int maxHitsBeforeCooldown = 4;
+    public int remainingHits = 4;
+    public float cooldownSeconds = 90f;
+    private float cooldownUntil = 0f;
+
+    public bool IsOnCooldown(out int waitSeconds)
+    {
+        if (!isPermanent || cooldownUntil <= 0f)
+        {
+            waitSeconds = 0;
+            return false;
+        }
+        float rem = cooldownUntil - Time.time;
+        if (rem <= 0f)
+        {
+            cooldownUntil = 0f;
+            remainingHits = Mathf.Max(1, maxHitsBeforeCooldown);
+            waitSeconds = 0;
+            return false;
+        }
+        waitSeconds = Mathf.CeilToInt(rem);
+        return true;
+    }
+
+    public bool TryConsumeStrike(out int hitsLeft, out int waitSeconds)
+    {
+        if (!isPermanent)
+        {
+            hitsLeft = 1;
+            waitSeconds = 0;
+            return true;
+        }
+
+        if (IsOnCooldown(out waitSeconds))
+        {
+            hitsLeft = 0;
+            return false;
+        }
+
+        if (remainingHits <= 0) remainingHits = Mathf.Max(1, maxHitsBeforeCooldown);
+        remainingHits--;
+        hitsLeft = remainingHits;
+        if (remainingHits <= 0)
+        {
+            cooldownUntil = Time.time + cooldownSeconds;
+        }
+        return true;
+    }
+
+    public void ResetNode(Vector2Int key, int tile, bool permanent)
+    {
+        gridKey = key;
+        tileID = tile;
+        isPermanent = permanent;
+        remainingHits = Mathf.Max(1, maxHitsBeforeCooldown);
+        cooldownUntil = 0f;
+    }
+}
+
 public class ResourceManager : MonoBehaviour
 {
-    // Acesso P/Invoke ao C++ (Data-Oriented Access)
     [DllImport("FragaNative", CallingConvention = CallingConvention.Cdecl)]
     public static extern int GetMapCell(System.IntPtr mapData, int width, int height, int x, int y);
 
@@ -11,14 +74,17 @@ public class ResourceManager : MonoBehaviour
     public static extern void UpdateMapCell(System.IntPtr mapData, int width, int height, int x, int y, int newTileID);
 
     [Header("Dependencies")]
-    public float interactionRange = 1.5f;
+    public float interactionRange = 1.6f;
     public Transform playerTransform;
     public InventoryAdvanced inventory;
 
-    // Referencias do Mapa
     public System.IntPtr MapDataPtr { get; private set; }
-    public int MapWidth { get; private set; } = 100;
-    public int MapHeight { get; private set; } = 100;
+    public int MapWidth { get; private set; } = FragaWorldBlueprint.DefaultWidth;
+    public int MapHeight { get; private set; } = FragaWorldBlueprint.DefaultHeight;
+
+    private readonly System.Collections.Generic.Dictionary<Vector2Int, int> resourceHealth = new System.Collections.Generic.Dictionary<Vector2Int, int>();
+    private MapRenderer mapRendererCache;
+    private UIManager uiCache;
 
     public void Initialize(System.IntPtr ptr, int width, int height)
     {
@@ -27,113 +93,196 @@ public class ResourceManager : MonoBehaviour
         MapHeight = height;
     }
 
-    private void Update()
+    private void Start()
     {
-        // Num jogo mobile, isto seria ativado por um botao UI "Interact" ou tap na grelha adjacente
-        if (Input.GetKeyDown(KeyCode.E))
-        {
-            TryHarvest();
-        }
+        if (inventory == null) inventory = InventoryAdvanced.Instance ?? FindAnyObjectByType<InventoryAdvanced>();
+        mapRendererCache = FindAnyObjectByType<MapRenderer>();
+        uiCache = FindAnyObjectByType<UIManager>();
     }
-
-    private System.Collections.Generic.Dictionary<Vector2Int, int> resourceHealth = new System.Collections.Generic.Dictionary<Vector2Int, int>();
 
     public void TryHarvest()
     {
-        if (playerTransform == null || MapDataPtr == System.IntPtr.Zero || inventory == null) return;
+        if (playerTransform == null && PlayerController.Instance != null) playerTransform = PlayerController.Instance.transform;
+        if (playerTransform == null || MapDataPtr == System.IntPtr.Zero) return;
 
-        // Posicao da celula imediatamente a frente do Iago
         Vector3 interactPos = playerTransform.position + playerTransform.forward * interactionRange;
-        int gridX = Mathf.RoundToInt(interactPos.x);
-        int gridY = Mathf.RoundToInt(interactPos.z);
+        TryHarvestAtGrid(Mathf.RoundToInt(interactPos.x), Mathf.RoundToInt(interactPos.z));
+    }
 
-        // Leitura otimizada O(1) diretamente da DLL Nativa
+    public void TryHarvestAtGrid(int gridX, int gridY)
+    {
+        if (MapDataPtr == System.IntPtr.Zero) return;
+        if (inventory == null) inventory = InventoryAdvanced.Instance;
+        if (inventory == null) return;
+        if (gridX < 0 || gridX >= MapWidth || gridY < 0 || gridY >= MapHeight) return;
+
         int tileID = GetMapCell(MapDataPtr, MapWidth, MapHeight, gridX, gridY);
-        
-        UIManager ui = FindAnyObjectByType<UIManager>();
         Vector2Int posKey = new Vector2Int(gridX, gridY);
+        Vector3 vfxPos = new Vector3(gridX, TerrainMeshGenerator.GetTerrainHeight(gridX, gridY) + 0.8f, gridY);
 
-        if (tileID == 1) // 1 = Arvore (Madeira) - Max Health 3
+        ItemData weapon = inventory.equippedMainHandId > 0 ? ItemDatabase.GetItem(inventory.equippedMainHandId) : null;
+
+        if (tileID == 1)
         {
             if (!resourceHealth.ContainsKey(posKey)) resourceHealth[posKey] = 3;
 
-            int amount = 1;
-            string bonusText = "";
+            float treeMult = weapon != null && weapon.harvestTreeMultiplier > 1.01f
+                ? weapon.harvestTreeMultiplier
+                : (inventory.HasItem(312) ? 3.0f : (inventory.HasItem(300) ? 2.2f : 1.0f));
 
-            // Ferramenta Passiva: Machado Rudimentar (ID 300)
-            if (inventory.HasItem(300)) 
-            {
-                amount *= 2;
-                bonusText = " (Bonus Machado)";
-            }
+            int amount = treeMult >= 2.8f ? 3 : (treeMult >= 1.8f ? 2 : 1);
+            int resinAmount = Random.value < (treeMult >= 1.8f ? 0.45f : 0.25f) ? 1 : 0;
+            int herbAmount = Random.value < 0.25f ? 1 : 0;
+            string bonusText = treeMult >= 2.8f ? " (Machado Ferro)" : (treeMult >= 1.8f ? " (Bonus Machado)" : "");
 
-            inventory.AddItem(100, amount); // 100 = Madeira
-            
+            AddOrDrop(100, amount, vfxPos);
+            if (resinAmount > 0) AddOrDrop(119, resinAmount, vfxPos);
+            if (herbAmount > 0) AddOrDrop(103, herbAmount, vfxPos);
+
             resourceHealth[posKey]--;
+
+            string extra = "";
+            if (resinAmount > 0) extra += ", +1 Resina";
+            if (herbAmount > 0) extra += ", +1 Ervas";
+
             if (resourceHealth[posKey] <= 0)
             {
-                UpdateMapCell(MapDataPtr, MapWidth, MapHeight, gridX, gridY, 0); // Torna em clareira
+                UpdateMapCell(MapDataPtr, MapWidth, MapHeight, gridX, gridY, 0);
                 resourceHealth.Remove(posKey);
-                
-                // --- NOVO: Sincronizar GPU Instancing (Evita Arvore Fantasma) ---
-                MapRenderer mapRenderer = FindAnyObjectByType<MapRenderer>();
-                if (mapRenderer != null) mapRenderer.RemoveInstanceAt(gridX, gridY, 1);
+                if (mapRendererCache == null) mapRendererCache = FindAnyObjectByType<MapRenderer>();
+                if (mapRendererCache != null) mapRendererCache.RemoveInstanceAt(gridX, gridY, 1);
 
-                if (ui != null) ui.SetLootTooltip($"+{amount} Madeira{bonusText} [Arvore Destruida]");
+                ShowMsg($"+{amount} Madeira{extra}{bonusText} [Arvore Derrubada]");
             }
             else
             {
-                if (ui != null) ui.SetLootTooltip($"+{amount} Madeira{bonusText} [Hits Restantes: {resourceHealth[posKey]}]");
+                ShowMsg($"+{amount} Madeira{extra}{bonusText} [Restam {resourceHealth[posKey]}]");
             }
-            
-            if (VFXPoolManager.Instance != null) VFXPoolManager.Instance.PlayBuildPlaceVFX(interactPos); // Particulas de madeira
+
+            if (VFXPoolManager.Instance != null) VFXPoolManager.Instance.PlayWoodChipVFX(vfxPos, Vector3.up);
+            if (AudioManager.Instance != null) AudioManager.Instance.PlayPickupSound();
         }
-        else if (tileID == 2) // 2 = Ruina Celta Antiga (Pedra e Ferro) - Max Health 4
+        else if (tileID == 2 || tileID == 8)
         {
-            if (!resourceHealth.ContainsKey(posKey)) resourceHealth[posKey] = 4;
+            HarvestRockInternal(posKey, vfxPos, tileID, null, clearNativeTile: true, targetObj: null);
+        }
+    }
 
-            int amount = 1;
-            int ironAmount = Random.Range(0, 100) < 30 ? 1 : 0; // 30% de chance por hit
-            string bonusText = "";
+    public void TryHarvestWorldRock(Vector3 hitPos, MineableRockNode node, Collider col)
+    {
+        if (inventory == null) inventory = InventoryAdvanced.Instance;
+        if (inventory == null) return;
 
-            // Ferramenta Passiva: Picareta de Pedra (ID 301)
-            if (inventory.HasItem(301)) 
+        if (node != null && node.isPermanent)
+        {
+            if (!node.TryConsumeStrike(out _, out int waitSec))
             {
-                amount *= 2;
-                if (ironAmount > 0) ironAmount *= 2;
-                bonusText = " (Bonus Picareta)";
+                ShowMsg($"Monumento esgotado temporariamente — aguarde {waitSec}s");
+                return;
             }
-
-            inventory.AddItem(101, amount); // 101 = Pedra
-            if (ironAmount > 0) inventory.AddItem(107, ironAmount); // 107 = Ferro Velho
-
-            resourceHealth[posKey]--;
-            if (resourceHealth[posKey] <= 0)
+        }
+        else if (node != null && MapDataPtr != System.IntPtr.Zero)
+        {
+            int gx = node.gridKey.x;
+            int gz = node.gridKey.y;
+            if (gx >= 0 && gx < MapWidth && gz >= 0 && gz < MapHeight)
             {
-                UpdateMapCell(MapDataPtr, MapWidth, MapHeight, gridX, gridY, 0); 
-                resourceHealth.Remove(posKey);
-
-                // --- NOVO: Sincronizar GPU Instancing (Evita Ruina Fantasma) ---
-                MapRenderer mapRenderer = FindAnyObjectByType<MapRenderer>();
-                if (mapRenderer != null) mapRenderer.RemoveInstanceAt(gridX, gridY, 2);
-
-                if (ui != null) ui.SetLootTooltip($"+{amount} Pedra, +{ironAmount} Ferro{bonusText} [Ruina Destruida]");
-            }
-            else
-            {
-                if (ui != null) 
+                int nativeTile = GetMapCell(MapDataPtr, MapWidth, MapHeight, gx, gz);
+                if (nativeTile == 2 || nativeTile == 8)
                 {
-                    if (ironAmount > 0) ui.SetLootTooltip($"+{amount} Pedra, +{ironAmount} Ferro{bonusText} [Hits Restantes: {resourceHealth[posKey]}]");
-                    else ui.SetLootTooltip($"+{amount} Pedra{bonusText} [Hits Restantes: {resourceHealth[posKey]}]");
+                    TryHarvestAtGrid(gx, gz);
+                    return;
                 }
             }
-            
-            if (VFXPoolManager.Instance != null) VFXPoolManager.Instance.PlayBuildPlaceVFX(interactPos);
+        }
+
+        Vector2Int key = node != null
+            ? node.gridKey
+            : new Vector2Int(Mathf.RoundToInt(hitPos.x), Mathf.RoundToInt(hitPos.z));
+        int tileId = node != null ? node.tileID : 8;
+        GameObject targetObj = node != null ? node.gameObject : (col != null ? col.gameObject : null);
+        Vector3 vfxPos = hitPos + Vector3.up * 0.55f;
+
+        HarvestRockInternal(key, vfxPos, tileId, node, clearNativeTile: false, targetObj: targetObj);
+    }
+
+    private void HarvestRockInternal(Vector2Int posKey, Vector3 vfxPos, int tileID, MineableRockNode node, bool clearNativeTile, GameObject targetObj)
+    {
+        bool isPermanent = node != null && node.isPermanent;
+        if (!isPermanent && !resourceHealth.ContainsKey(posKey))
+            resourceHealth[posKey] = 4;
+
+        ItemData weapon = inventory.equippedMainHandId > 0 ? ItemDatabase.GetItem(inventory.equippedMainHandId) : null;
+        float rockMult = weapon != null && weapon.harvestRockMultiplier > 1.01f
+            ? weapon.harvestRockMultiplier
+            : (inventory.HasItem(301) ? 2.5f : (inventory.HasItem(312) ? 1.6f : 1.0f));
+
+        bool hasPick = rockMult >= 2.0f;
+        int amount = rockMult >= 2.3f ? 3 : (rockMult >= 1.4f ? 2 : 1);
+        int ironAmount = Random.Range(0, 100) < (hasPick ? 58 : 25) ? (hasPick ? 2 : 1) : 0;
+        int saltAmount = Random.Range(0, 100) < (hasPick ? 45 : 22) ? 1 : 0;
+        string bonusText = hasPick ? " (Bonus Picareta)" : (rockMult >= 1.4f ? " (Ferramenta)" : " (Maos)");
+
+        AddOrDrop(101, amount, vfxPos);
+        if (ironAmount > 0) AddOrDrop(107, ironAmount, vfxPos);
+        if (saltAmount > 0) AddOrDrop(106, saltAmount, vfxPos);
+
+        string extras = "";
+        if (ironAmount > 0) extras += $", +{ironAmount} Ferro";
+        if (saltAmount > 0) extras += $", +{saltAmount} Sal";
+
+        if (!isPermanent)
+        {
+            resourceHealth[posKey]--;
+            if (resourceHealth[posKey] <= 0)
+            {
+                if (clearNativeTile && MapDataPtr != System.IntPtr.Zero)
+                {
+                    UpdateMapCell(MapDataPtr, MapWidth, MapHeight, posKey.x, posKey.y, 0);
+                }
+                resourceHealth.Remove(posKey);
+
+                if (mapRendererCache == null) mapRendererCache = FindAnyObjectByType<MapRenderer>();
+                if (mapRendererCache != null)
+                {
+                    mapRendererCache.RemoveInstanceAt(posKey.x, posKey.y, tileID);
+                }
+                else if (targetObj != null)
+                {
+                    Destroy(targetObj);
+                }
+
+                string label = tileID == 2 ? "Ruina Minada" : "Rocha Minada";
+                ShowMsg($"+{amount} Pedra{extras}{bonusText} [{label}]");
+            }
+            else
+            {
+                ShowMsg($"+{amount} Pedra{extras}{bonusText}");
+            }
         }
         else
         {
-            if (ui != null) ui.SetLootTooltip(""); // Limpar se bater no ar
+            string remText = node != null && node.remainingHits > 0 ? $" [Restam {node.remainingHits}]" : " [Esgotado 90s]";
+            ShowMsg($"+{amount} Pedra{extras}{bonusText}{remText}");
+        }
+
+        if (VFXPoolManager.Instance != null) VFXPoolManager.Instance.PlaySparkVFX(vfxPos, Vector3.up);
+        if (AudioManager.Instance != null) AudioManager.Instance.PlayPickupSound();
+    }
+
+    private void AddOrDrop(int itemId, int amount, Vector3 dropPos)
+    {
+        if (inventory == null || amount <= 0) return;
+        int leftover = inventory.AddItem(itemId, amount);
+        if (leftover > 0 && LootManager.Instance != null)
+        {
+            LootManager.Instance.DropItem(itemId, leftover, dropPos);
         }
     }
-}
 
+    private void ShowMsg(string msg)
+    {
+        if (HUDSurvivalOverlay.Instance != null) HUDSurvivalOverlay.Instance.ShowLootTooltip(msg);
+        else if (uiCache != null) uiCache.SetLootTooltip(msg);
+    }
+}

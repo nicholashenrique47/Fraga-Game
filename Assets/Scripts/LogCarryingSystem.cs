@@ -1,13 +1,8 @@
 ﻿using UnityEngine;
 
 /// <summary>
-/// LogCarryingSystem: Sistema de Transporte de Toras no Ombro (Padrão The Forest / Sons of the Forest).
-/// Suporta:
-/// - Transporte físico de até 2 toras inteiras de madeira nos ombros.
-/// - Representação visual diegética em primeira pessoa com oscilação harmônica (sway) ao caminhar.
-/// - Penalidades fisiológicas dinâmicas: 1 tora (-15% de velocidade de corrida), 2 toras (corrida e pulo desabilitados, max 3.2 m/s).
-/// - Ação de soltar suavemente (Botão Interagir ✋ ou tecla E) e arremesso parabólico para frente (Botão Atacar 🪓 ou tecla F).
-/// - Áudio procedural sintetizado realista para coleta, soltura e arremesso balístico.
+/// LogCarryingSystem: Transporte fisico de ate 2 toras de madeira nos ombros.
+/// Interacao unificada via InteractionDetector; ataque arremessa a tora via ChoppingAndCombatSystem.
 /// </summary>
 public class LogCarryingSystem : MonoBehaviour
 {
@@ -69,7 +64,6 @@ public class LogCarryingSystem : MonoBehaviour
         Material barkMat = Resources.Load<Material>("Materials/Mat_DarkForest_Bark");
         if (barkMat == null) barkMat = Resources.Load<Material>("Materials/Wood_Bark");
 
-        // Tora 1 (Direita Ombro Baixo)
         visualLog1 = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
         visualLog1.name = "Shoulder_Log_01";
         Destroy(visualLog1.GetComponent<Collider>());
@@ -79,7 +73,6 @@ public class LogCarryingSystem : MonoBehaviour
         visualLog1.transform.localScale = new Vector3(0.18f, 0.70f, 0.18f);
         if (barkMat != null) visualLog1.GetComponent<MeshRenderer>().sharedMaterial = barkMat;
 
-        // Tora 2 (Direita Ombro Alto Empilhada)
         visualLog2 = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
         visualLog2.name = "Shoulder_Log_02";
         Destroy(visualLog2.GetComponent<Collider>());
@@ -92,22 +85,10 @@ public class LogCarryingSystem : MonoBehaviour
 
     private void Update()
     {
-        // 1. Tecla E no PC para interagir/pegar tora próxima se houver vaga
-        if (Input.GetKeyDown(KeyCode.E))
-        {
-            if (currentLogs < MAX_LOGS)
-            {
-                TryPickupNearbyLog();
-            }
-            else
-            {
-                DropLog(false);
-            }
-        }
+        if (currentLogs <= 0) return;
 
-        // 2. Animação de sway suave ao caminhar
-        PlayerController pc = PlayerController.Instance != null ? PlayerController.Instance : FindAnyObjectByType<PlayerController>();
-        if (pc != null && pc.IsMoving && pc.IsGrounded && currentLogs > 0)
+        PlayerController pc = PlayerController.Instance;
+        if (pc != null && pc.IsMoving && pc.IsGrounded)
         {
             walkSwayTimer += Time.deltaTime * 6.0f;
             float swayY = Mathf.Sin(walkSwayTimer) * 0.018f;
@@ -157,6 +138,14 @@ public class LogCarryingSystem : MonoBehaviour
         return false;
     }
 
+    public bool ConsumeOneLog()
+    {
+        if (currentLogs <= 0) return false;
+        currentLogs--;
+        UpdateVisualLogMounts();
+        return true;
+    }
+
     public void PickupLog()
     {
         if (currentLogs >= MAX_LOGS) return;
@@ -169,8 +158,8 @@ public class LogCarryingSystem : MonoBehaviour
             audioSource.PlayOneShot(pickupClip, 0.85f);
         }
 
-        HUDSurvivalOverlay hud = FindAnyObjectByType<HUDSurvivalOverlay>();
-        if (hud != null) hud.ShowLootTooltip($"Tora apoiada no ombro! ({currentLogs}/{MAX_LOGS})");
+        if (HUDSurvivalOverlay.Instance != null)
+            HUDSurvivalOverlay.Instance.ShowLootTooltip($"Tora apoiada no ombro! ({currentLogs}/{MAX_LOGS})");
     }
 
     public void DropLog(bool throwForward)
@@ -179,7 +168,6 @@ public class LogCarryingSystem : MonoBehaviour
         currentLogs--;
         UpdateVisualLogMounts();
 
-        // Spawna a tora física no mundo
         Vector3 spawnPos = transform.position + transform.forward * 1.1f + Vector3.up * 0.6f;
         GameObject logObj = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
         logObj.name = "Felled_Wood_Log";
@@ -190,7 +178,6 @@ public class LogCarryingSystem : MonoBehaviour
         Material barkMat = Resources.Load<Material>("Materials/Mat_DarkForest_Bark");
         if (barkMat != null) logObj.GetComponent<MeshRenderer>().sharedMaterial = barkMat;
 
-        // Adiciona física com Rigidbody
         Rigidbody rb = logObj.AddComponent<Rigidbody>();
         rb.mass = 18f;
         rb.collisionDetectionMode = CollisionDetectionMode.Continuous;
@@ -218,22 +205,23 @@ public class LogCarryingSystem : MonoBehaviour
             }
         }
 
-        // Torna coletável adicionando ResourcePickup
         ResourcePickup pickup = logObj.AddComponent<ResourcePickup>();
         pickup.itemID = 100;
         pickup.amount = 2;
 
-        HUDSurvivalOverlay hud = FindAnyObjectByType<HUDSurvivalOverlay>();
-        if (hud != null) hud.ShowLootTooltip(throwForward ? "Tora arremessada!" : "Tora depositada no solo.");
+        if (HUDSurvivalOverlay.Instance != null)
+            HUDSurvivalOverlay.Instance.ShowLootTooltip(throwForward ? "Tora arremessada!" : "Tora depositada no solo.");
     }
 
     private void UpdateVisualLogMounts()
     {
         if (visualLog1 != null) visualLog1.SetActive(currentLogs >= 1);
         if (visualLog2 != null) visualLog2.SetActive(currentLogs >= 2);
+        if (FirstPersonViewmodelController.Instance != null)
+        {
+            FirstPersonViewmodelController.Instance.SetCarryingLogs(currentLogs > 0);
+        }
     }
-
-    // =================== SÍNTESE PROCEDURAL DE ÁUDIO REALISTA ===================
 
     private AudioClip GeneratePickupLogSound()
     {

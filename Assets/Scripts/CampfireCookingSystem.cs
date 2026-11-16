@@ -5,34 +5,36 @@ public class CampfireCookingSystem : MonoBehaviour
     public Transform playerTransform;
     public InventoryAdvanced inventory;
     public GameManager gameManager;
-    
+
     [Header("Settings")]
     public float interactRange = 2.5f;
 
-    private void Update()
+    private UIManager uiCache;
+
+    private void Start()
     {
-        // PC Shortcut for cooking
-        if (Input.GetKeyDown(KeyCode.C))
-        {
-            TryCookFood();
-        }
+        if (inventory == null) inventory = InventoryAdvanced.Instance ?? FindAnyObjectByType<InventoryAdvanced>();
+        if (gameManager == null) gameManager = FindAnyObjectByType<GameManager>();
+        uiCache = FindAnyObjectByType<UIManager>();
     }
-    
-    // Chamado pela UI de Crafting ou Botao de Interacao
+
+    // Chamado pelo InteractionDetector ou pela aba de Fabricacao
     public void TryCookFood()
     {
+        if (playerTransform == null && PlayerController.Instance != null) playerTransform = PlayerController.Instance.transform;
+        if (inventory == null) inventory = InventoryAdvanced.Instance;
+        if (gameManager == null) gameManager = FindAnyObjectByType<GameManager>();
         if (playerTransform == null || gameManager == null || gameManager.mapDataPtr == System.IntPtr.Zero || inventory == null) return;
-        
-        // Verifica se ha fogueira ou caldeirao perto
+
         bool isNearCampfire = false;
         bool isNearCauldron = false;
-        
+
         int pX = Mathf.RoundToInt(playerTransform.position.x);
         int pY = Mathf.RoundToInt(playerTransform.position.z);
-        
-        for (int x = pX - 2; x <= pX + 2; x++)
+
+        for (int x = pX - 3; x <= pX + 3; x++)
         {
-            for (int y = pY - 2; y <= pY + 2; y++)
+            for (int y = pY - 3; y <= pY + 3; y++)
             {
                 if (x >= 0 && x < gameManager.mapWidth && y >= 0 && y < gameManager.mapHeight)
                 {
@@ -42,70 +44,85 @@ public class CampfireCookingSystem : MonoBehaviour
                 }
             }
         }
-        
+
+        if (!isNearCampfire && !isNearCauldron && CraftingSystem.Instance != null)
+        {
+            if (CraftingSystem.Instance.IsNearStation(CraftingStationType.Cauldron)) isNearCauldron = true;
+            if (CraftingSystem.Instance.IsNearStation(CraftingStationType.Bonfire)) isNearCampfire = true;
+        }
+
+        if (!isNearCampfire && !isNearCauldron && PlayerStatus.Instance != null && PlayerStatus.Instance.isNearBonfire)
+        {
+            isNearCampfire = true;
+        }
+
         if (!isNearCampfire && !isNearCauldron)
         {
-            UIManager ui = FindAnyObjectByType<UIManager>();
-            if (ui != null) ui.SetLootTooltip("Precisas de Fogo!");
-            Debug.Log("[Cooking] Sem fogueira ou caldeirao por perto.");
+            ShowMsg("Aproxime-se de uma Fogueira ou Caldeirao!");
             return;
         }
-        
+
         bool cookedSomething = false;
 
-        // Receita Druida (Requer Caldeirao)
         if (isNearCauldron && inventory.HasItem(111) && inventory.HasItem(203) && inventory.HasItem(109))
         {
             inventory.RemoveItem(111, 1);
             inventory.RemoveItem(203, 1);
             inventory.RemoveItem(109, 1);
-            inventory.AddItem(208, 1); // Ensopado Druida
+            inventory.AddItem(208, 1);
             cookedSomething = true;
-            UIManager ui = FindAnyObjectByType<UIManager>();
-            if (ui != null) ui.SetLootTooltip("Fez: Ensopado Druida!");
-            Debug.Log("[Cooking] Ensopado feito com sucesso.");
+            ShowMsg("Preparou: Ensopado Druida!");
         }
         else if (inventory.HasItem(104))
         {
             inventory.RemoveItem(104, 1);
             inventory.AddItem(200, 1);
             cookedSomething = true;
-            UIManager ui = FindAnyObjectByType<UIManager>();
-            if (ui != null) ui.SetLootTooltip("Cozinhou: Carne Assada!");
-            Debug.Log("[Cooking] Carne Assada cozinhada com sucesso.");
+            ShowMsg("Assou: Carne Assada!");
         }
-        
-        // Converte Carne Leve (113) em Carne Assada (200) - Pode ser no mesmo output ou um novo. Vamos usar 200.
         else if (inventory.HasItem(113))
         {
             inventory.RemoveItem(113, 1);
             inventory.AddItem(200, 1);
             cookedSomething = true;
-            UIManager ui = FindAnyObjectByType<UIManager>();
-            if (ui != null) ui.SetLootTooltip("Cozinhou: Carne Assada (Coelho)!");
-            Debug.Log("[Cooking] Coelho Assado com sucesso.");
+            ShowMsg("Assou: Carne de Coelho!");
         }
-        
-        // Converte Peixe Cru (111) em Peixe Assado (207)
         else if (inventory.HasItem(111))
         {
             inventory.RemoveItem(111, 1);
             inventory.AddItem(207, 1);
             cookedSomething = true;
-            UIManager ui = FindAnyObjectByType<UIManager>();
-            if (ui != null) ui.SetLootTooltip("Cozinhou: Peixe Assado!");
-            Debug.Log("[Cooking] Peixe Assado cozinhado com sucesso.");
+            ShowMsg("Assou: Peixe Assado!");
         }
-        
+        else if (inventory.HasItem(123))
+        {
+            inventory.RemoveItem(123, 1);
+            inventory.AddItem(109, 1);
+            cookedSomething = true;
+            ShowMsg("Ferveu: Agua Limpa purificada!");
+        }
+        else if (inventory.HasItem(109) && inventory.GetItemCount(103) >= 2)
+        {
+            inventory.RemoveItem(109, 1);
+            inventory.RemoveItem(103, 2);
+            inventory.AddItem(211, 1);
+            cookedSomething = true;
+            ShowMsg("Preparou: Cha de Ervas Quente!");
+        }
+
         if (cookedSomething)
         {
             if (VFXPoolManager.Instance != null) VFXPoolManager.Instance.PlayBuildPlaceVFX(playerTransform.position);
         }
         else
         {
-            UIManager ui = FindAnyObjectByType<UIManager>();
-            if (ui != null) ui.SetLootTooltip("Sem comida crua!");
-            Debug.Log("[Cooking] Nao tens comida crua para cozinhar.");
+            ShowMsg("Sem carne ou peixe cru na mochila!");
         }
+    }
+
+    private void ShowMsg(string msg)
+    {
+        if (HUDSurvivalOverlay.Instance != null) HUDSurvivalOverlay.Instance.ShowLootTooltip(msg);
+        else if (uiCache != null) uiCache.SetLootTooltip(msg);
     }
 }

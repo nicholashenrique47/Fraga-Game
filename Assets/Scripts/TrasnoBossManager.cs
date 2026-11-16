@@ -39,7 +39,11 @@ public class TrasnoBossManager : MonoBehaviour
         trasnoSpawned = true;
         
         // Nasce longe do centro (geralmente onde o player não está)
-        Vector3 spawnPos = new Vector3(Random.Range(10f, 90f), 0f, Random.Range(10f, 90f));
+        int mw = (gameManager != null && gameManager.mapWidth > 0) ? gameManager.mapWidth : FragaWorldBlueprint.DefaultWidth;
+        int mh = (gameManager != null && gameManager.mapHeight > 0) ? gameManager.mapHeight : FragaWorldBlueprint.DefaultHeight;
+        float sx = Random.Range(120f, Mathf.Max(140f, mw - 120f));
+        float sz = Random.Range(120f, Mathf.Max(140f, mh - 120f));
+        Vector3 spawnPos = new Vector3(sx, TerrainMeshGenerator.GetTerrainHeight(sx, sz), sz);
         
         if (trasnoPrefab != null)
         {
@@ -84,6 +88,8 @@ public class TrasnoBossManager : MonoBehaviour
     private float attackTimer = 0f;
     private void CheckAttack()
     {
+        if (gameManager == null || gameManager.mapDataPtr == System.IntPtr.Zero) return;
+
         attackTimer += Time.deltaTime;
         if (attackTimer < 1f) return; // Checa 1x por segundo
         
@@ -96,12 +102,14 @@ public class TrasnoBossManager : MonoBehaviour
         int[] dx = {1, -1, 0, 0};
         int[] dy = {0, 0, 1, -1};
         
+        int mw = Mathf.Max(1, gameManager.mapWidth);
+        int mh = Mathf.Max(1, gameManager.mapHeight);
         for (int i = 0; i < 4; i++)
         {
             int checkX = gridX + dx[i];
             int checkY = gridY + dy[i];
             
-            int cellID = ResourceManager.GetMapCell(gameManager.mapDataPtr, 100, 100, checkX, checkY);
+            int cellID = ResourceManager.GetMapCell(gameManager.mapDataPtr, mw, mh, checkX, checkY);
             if (cellID == 3) // 3 = Barricada
             {
                 // DESTRUIR
@@ -109,7 +117,8 @@ public class TrasnoBossManager : MonoBehaviour
                 
                 if (VFXPoolManager.Instance != null)
                 {
-                    VFXPoolManager.Instance.PlayBuildPlaceVFX(new Vector3(checkX, 0, checkY));
+                    float vy = TerrainMeshGenerator.GetTerrainHeight(checkX, checkY);
+                    VFXPoolManager.Instance.PlayBuildPlaceVFX(new Vector3(checkX, vy, checkY));
                 }
                 
                 Debug.LogWarning($"[TrasnoBoss] BARRICADA DESTRUIDA em ({checkX}, {checkY}) pelo Trasno!");

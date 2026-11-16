@@ -1,296 +1,266 @@
 ﻿using UnityEngine;
 
+/// <summary>
+/// EquipmentSystem: Orquestrador central de Acao Primaria (ataque leve/pesado, pesca, enxada, arco)
+/// e Acao Secundaria (mira de arco, arremesso de lanca, bloqueio/parry).
+/// Zero teclas soltas — toda entrada vem exclusivamente do FragaInputRouter.
+/// </summary>
 public class EquipmentSystem : MonoBehaviour
 {
+    public static EquipmentSystem Instance { get; private set; }
+
     [Header("Dependencies")]
-    public Transform playerHandTransform; // Onde a arma Ã© instanciada
+    public Transform playerHandTransform;
     public PlayerStatus playerStatus;
     public InventoryAdvanced inventory;
-    
-    [Header("Weapon Settings")]
-    public float attackRange = 2f;
-    public float attackCooldown = 0.8f;
-    public LayerMask enemyLayer; // Layer "Enemy" (Fauna / Vultos)
-    
-    private GameObject currentWeaponInstance;
-    private int currentWeaponID = -1; // -1 = Desarmado (Punhos)
-    
-    private float lastAttackTime = 0f;
 
-    private VultoManager vultosCache;
-    private FaunaManager faunaCache;
-    private MapRenderer mapRendererCache;
-    private HapticManager hapticCache;
-    private AudioManager audioCache;
+    [Header("Charge Settings")]
+    public float heavyChargeThreshold = 0.42f;
+    public float maxSpearChargeTime = 0.90f;
 
-    // Ãudio Procedural
-    private AudioSource weaponAudio;
-    private AudioClip clipSwing;
-    private AudioClip clipHitWood;
-    private AudioClip clipHitRock;
-    private AudioClip clipHitFlesh;
+    public int CurrentWeaponID { get; private set; } = -1;
+
+    private bool trackingMeleePress = false;
+    private float meleePressTimer = 0f;
+
+    private bool isAimingSpear = false;
+    private float spearChargeTimer = 0f;
+
+    private BowAndArrowSystem bowCache;
+    private PlayerMeleeCombatDefense defenseCache;
+    private ChoppingAndCombatSystem combatCache;
+    private FishingSystem fishingCache;
+    private FarmingSystem farmingCache;
+
+    private void Awake()
+    {
+        if (Instance == null) Instance = this;
+    }
 
     private void Start()
     {
-        vultosCache = FindAnyObjectByType<VultoManager>();
-        faunaCache = FindAnyObjectByType<FaunaManager>();
-        mapRendererCache = FindAnyObjectByType<MapRenderer>();
-        hapticCache = FindAnyObjectByType<HapticManager>();
-        audioCache = FindAnyObjectByType<AudioManager>();
-        
-        weaponAudio = gameObject.AddComponent<AudioSource>();
-        weaponAudio.spatialBlend = 0.5f;
-        
-        clipSwing = GenerateActionClip("swing");
-        clipHitWood = GenerateActionClip("wood");
-        clipHitRock = GenerateActionClip("rock");
-        clipHitFlesh = GenerateActionClip("flesh");
-    }
+        if (inventory == null) inventory = InventoryAdvanced.Instance ?? FindAnyObjectByType<InventoryAdvanced>();
+        if (playerStatus == null) playerStatus = PlayerStatus.Instance ?? FindAnyObjectByType<PlayerStatus>();
 
-    private AudioClip GenerateActionClip(string type)
-    {
-        int sampleRate = 44100;
-        float duration = type == "swing" ? 0.2f : 0.15f;
-        float[] samples = new float[(int)(sampleRate * duration)];
-        
-        for (int i = 0; i < samples.Length; i++)
+        bowCache = BowAndArrowSystem.Instance ?? GetComponent<BowAndArrowSystem>() ?? FindAnyObjectByType<BowAndArrowSystem>();
+        defenseCache = PlayerMeleeCombatDefense.Instance ?? GetComponent<PlayerMeleeCombatDefense>() ?? FindAnyObjectByType<PlayerMeleeCombatDefense>();
+        combatCache = ChoppingAndCombatSystem.Instance ?? GetComponent<ChoppingAndCombatSystem>() ?? FindAnyObjectByType<ChoppingAndCombatSystem>();
+        fishingCache = FishingSystem.Instance ?? FindAnyObjectByType<FishingSystem>();
+        farmingCache = FarmingSystem.Instance ?? FindAnyObjectByType<FarmingSystem>();
+
+        if (inventory != null)
         {
-            float t = (float)i / samples.Length;
-            float timeSec = (float)i / sampleRate;
-            float sample = 0f;
-            
-            if (type == "swing")
-            {
-                float freq = 200f - t * 150f;
-                sample = Mathf.Sin(2f * Mathf.PI * freq * timeSec) * Mathf.Exp(-5f * t);
-            }
-            else if (type == "wood")
-            {
-                float noise = Random.Range(-1f, 1f);
-                float env = Mathf.Exp(-20f * t);
-                sample = noise * env * 0.7f + Mathf.Sin(2f * Mathf.PI * 300f * timeSec) * env * 0.3f;
-            }
-            else if (type == "rock")
-            {
-                float noise = Random.Range(-1f, 1f);
-                float env = Mathf.Exp(-40f * t);
-                sample = noise * env * 0.9f + Mathf.Sin(2f * Mathf.PI * 800f * timeSec) * env * 0.1f;
-            }
-            else if (type == "flesh")
-            {
-                float noise = Random.Range(-1f, 1f);
-                float env = Mathf.Exp(-15f * t);
-                sample = noise * env * 0.4f + Mathf.Sin(2f * Mathf.PI * 150f * timeSec) * env * 0.6f;
-            }
-            
-            samples[i] = sample * 0.6f;
+            inventory.OnEquipmentChanged += SyncEquippedFromInventory;
+            SyncEquippedFromInventory();
         }
-
-        AudioClip clip = AudioClip.Create($"Synth_{type}", samples.Length, 1, sampleRate, false);
-        clip.SetData(samples, 0);
-        return clip;
     }
 
-    private void Update()
+    private void OnDestroy()
     {
-        // Se quisermos atalho de teclado para PC
-        if (Input.GetKeyDown(KeyCode.Space))
+        if (inventory != null)
         {
-            Attack();
+            inventory.OnEquipmentChanged -= SyncEquippedFromInventory;
+        }
+    }
+
+    private void SyncEquippedFromInventory()
+    {
+        if (inventory == null) return;
+        CurrentWeaponID = inventory.equippedMainHandId;
+
+        if (isAimingSpear && CurrentWeaponID != 308)
+        {
+            CancelSpearAim();
+        }
+        if (bowCache != null && bowCache.IsAiming && CurrentWeaponID != 305)
+        {
+            bowCache.CancelAim();
         }
     }
 
     public void EquipWeapon(int itemID, GameObject weaponPrefab)
     {
-        if (currentWeaponInstance != null)
+        CurrentWeaponID = itemID;
+        if (inventory != null && inventory.equippedMainHandId != itemID)
         {
-            Destroy(currentWeaponInstance);
+            inventory.EquipItem(itemID);
         }
-        
-        currentWeaponID = itemID;
-        
-        if (weaponPrefab != null && playerHandTransform != null)
-        {
-            currentWeaponInstance = Instantiate(weaponPrefab, playerHandTransform);
-            currentWeaponInstance.transform.localPosition = Vector3.zero;
-            currentWeaponInstance.transform.localRotation = Quaternion.identity;
-            if (currentWeaponInstance.GetComponent<WeaponMotionSway>() == null)
-            {
-                currentWeaponInstance.AddComponent<WeaponMotionSway>();
-            }
-        }
-        
-        Debug.Log($"[Equipment] Arma equipada: ID {itemID}");
     }
 
     public void Attack()
     {
-        if (Time.time - lastAttackTime < attackCooldown) return;
-        
-        // Custo de Stamina
-        if (playerStatus != null)
-        {
-            if (playerStatus.stamina < 15f)
-            {
-                Debug.LogWarning("[Equipment] Sem stamina para atacar!");
-                return;
-            }
-            playerStatus.stamina -= 15f;
-        }
-        
-        lastAttackTime = Time.time;
-        
-        // Efeito Sonoro / AnimaÃ§Ã£o BÃ¡sica (Placeholder via Juice)
-        if (weaponAudio != null) weaponAudio.PlayOneShot(clipSwing);
-        
-        if (currentWeaponInstance != null)
-        {
-            WeaponMotionSway motion = currentWeaponInstance.GetComponent<WeaponMotionSway>();
-            if (motion == null) motion = currentWeaponInstance.AddComponent<WeaponMotionSway>();
-            motion.TriggerAttackMotion();
-        }
-        
-        // CÃ¡lculo de Dano e Range (Arma Branca, Punhos ou Arco)
-        float damage = 5f; // Punhos
-        float currentAttackRange = attackRange;
-        bool isRanged = false;
-        
-        if (currentWeaponID == 302) damage = 25f; // Faca de caÃ§a
-        else if (currentWeaponID == 300) damage = 10f; // Machado
-        else if (currentWeaponID == 305) 
-        {
-            // Arco de Sobrevivencia
-            if (inventory == null || !inventory.HasItem(110)) // 110 = Flechas
-            {
-                Debug.LogWarning("[Equipment] Sem flechas!");
-                UIManager ui = FindAnyObjectByType<UIManager>();
-                if (ui != null) ui.SetLootTooltip("Sem Flechas!");
-                return;
-            }
-            
-            inventory.RemoveItem(110, 1);
-            damage = 100f; // Dano letal
-            currentAttackRange = 25f; // Long Range
-            isRanged = true;
-            Debug.Log("[Equipment] Flecha disparada!");
-        }
-        
-        // Logica de HitDetection baseada no tipo de arma
-        Vector3 origin = transform.position + Vector3.up * 1f;
-        Vector3 dir = transform.forward;
-        bool hitSomething = false;
+        if (combatCache == null) combatCache = ChoppingAndCombatSystem.Instance;
+        if (combatCache != null) combatCache.TriggerAttack(false);
+    }
 
-        if (isRanged)
+    private void Update()
+    {
+        FragaInputRouter router = FragaInputRouter.Instance;
+        if (router == null) return;
+
+        if (!router.IsGameplayAllowed)
         {
-            // Tiro de flecha (Raycast fino e longo)
-            if (Physics.Raycast(origin, dir, out RaycastHit hit, currentAttackRange))
-            {
-                string hitType = CheckHit(hit.point, damage, currentWeaponID);
-                if (hitType != "none")
-                {
-                    hitSomething = true;
-                    if (weaponAudio != null)
-                    {
-                        if (hitType == "flesh") weaponAudio.PlayOneShot(clipHitFlesh);
-                        else if (hitType == "wood") weaponAudio.PlayOneShot(clipHitWood);
-                        else if (hitType == "rock") weaponAudio.PlayOneShot(clipHitRock);
-                    }
-                }
-                if (VFXPoolManager.Instance != null) VFXPoolManager.Instance.PlayBuildPlaceVFX(hit.point); // Hit feedback
-            }
+            trackingMeleePress = false;
+            if (isAimingSpear) CancelSpearAim();
+            if (bowCache != null && bowCache.IsAiming) bowCache.CancelAim();
+            if (defenseCache != null && defenseCache.isBlocking) defenseCache.StopBlock();
+            return;
         }
-        else
+
+        if (inventory != null) CurrentWeaponID = inventory.equippedMainHandId;
+
+        HandleSecondaryAction(router);
+        HandlePrimaryAction(router);
+    }
+
+    private void HandlePrimaryAction(FragaInputRouter router)
+    {
+        // Arco (305): clicar primario enquanto mira solta a flecha; clicar sem mirar faz tiro rapido
+        if (CurrentWeaponID == 305)
         {
-            // Melee (SphereCast / Cone)
-            RaycastHit[] hits = Physics.SphereCastAll(origin, 1.5f, dir, currentAttackRange);
-            foreach(var hit in hits)
+            if (router.PrimaryDownThisFrame)
             {
-                string hitType = CheckHit(hit.point, damage, currentWeaponID);
-                if (hitType != "none")
+                if (bowCache == null) bowCache = BowAndArrowSystem.Instance;
+                if (bowCache != null)
                 {
-                    hitSomething = true;
-                    if (weaponAudio != null)
-                    {
-                        if (hitType == "flesh") weaponAudio.PlayOneShot(clipHitFlesh);
-                        else if (hitType == "wood") weaponAudio.PlayOneShot(clipHitWood);
-                        else if (hitType == "rock") weaponAudio.PlayOneShot(clipHitRock);
-                    }
-                    break;
+                    if (bowCache.IsAiming) bowCache.ReleaseArrow();
+                    else bowCache.QuickShot();
                 }
             }
+            return;
         }
-        
-        if (hitSomething)
+
+        // Vara de Pesca (306)
+        if (CurrentWeaponID == 306)
         {
-            if (hapticCache != null) hapticCache.TriggerHeavyVibration();
-            Debug.Log("[Equipment] Acertou num alvo!");
+            if (router.PrimaryDownThisFrame)
+            {
+                if (fishingCache == null) fishingCache = FishingSystem.Instance;
+                if (fishingCache != null) fishingCache.TryFish();
+            }
+            return;
+        }
+
+        // Enxada (307): tenta lavrar/plantar antes de golpear
+        if (CurrentWeaponID == 307 && router.PrimaryDownThisFrame)
+        {
+            if (farmingCache == null) farmingCache = FarmingSystem.Instance;
+            if (farmingCache != null && farmingCache.TryTillOrPlant())
+            {
+                if (FirstPersonViewmodelController.Instance != null)
+                    FirstPersonViewmodelController.Instance.TriggerPrimaryAttack(0, false);
+                return;
+            }
+        }
+
+        // Melee / Ferramentas / Punhos: toque rapido = ataque leve; segurar >= 0.42s = ataque pesado
+        if (router.PrimaryDownThisFrame)
+        {
+            trackingMeleePress = true;
+            meleePressTimer = 0f;
+        }
+
+        if (trackingMeleePress && router.PrimaryHeld)
+        {
+            meleePressTimer += Time.deltaTime;
+        }
+
+        if (trackingMeleePress && router.PrimaryUpThisFrame)
+        {
+            bool isHeavy = meleePressTimer >= heavyChargeThreshold;
+            trackingMeleePress = false;
+            meleePressTimer = 0f;
+
+            if (combatCache == null) combatCache = ChoppingAndCombatSystem.Instance;
+            if (combatCache != null) combatCache.TriggerAttack(isHeavy);
         }
     }
-    
-    private string CheckHit(Vector3 hitPoint, float damage, int weaponID)
+
+    private void HandleSecondaryAction(FragaInputRouter router)
     {
-        if (vultosCache != null && vultosCache.TryDamageVultoAt(hitPoint, damage)) return "flesh";
-        
-        if (faunaCache != null && faunaCache.TryDamageFaunaAt(hitPoint, damage)) return "flesh";
-        
-        if (mapRendererCache != null)
+        // 1. Arco (305): Segurar para retesar, soltar para disparar
+        if (CurrentWeaponID == 305)
         {
-            int gridX = Mathf.RoundToInt(hitPoint.x);
-            int gridY = Mathf.RoundToInt(hitPoint.z);
-            
-            if (weaponID == 300 && mapRendererCache.TryHarvestTreeAt(gridX, gridY))
-            {
-                if (inventory != null)
-                {
-                    inventory.AddItem(100, 2);
-                    Debug.Log("[Equipment] Ãrvore derrubada! +2 Madeira.");
-                }
-                return "wood";
-            }
-            else if (weaponID == 301 && mapRendererCache.TryHarvestRockAt(gridX, gridY))
-            {
-                if (inventory != null)
-                {
-                    inventory.AddItem(101, 3);
-                    Debug.Log("[Equipment] Rocha destruida! +3 Pedra.");
-                }
-                return "rock";
-            }
-            else
-            {
-                int plantID = mapRendererCache.TryHarvestPlantAt(gridX, gridY);
-                if (plantID == 9) // Berry
-                {
-                    if (inventory != null)
-                    {
-                        inventory.AddItem(202, 2); // 2x Bagas Silvestres
-                        Debug.Log("[Equipment] Colheu +2 Bagas Silvestres.");
-                    }
-                    return "wood";
-                }
-                else if (plantID == 10) // Mushroom
-                {
-                    if (inventory != null)
-                    {
-                        // 50% de chance de ser Cogumelo Estranho (203) ou Erva (103)
-                        int item = UnityEngine.Random.value > 0.5f ? 203 : 103;
-                        inventory.AddItem(item, 1);
-                        Debug.Log($"[Equipment] Colheu Cogumelo/Erva (ID {item}).");
-                    }
-                    return "flesh"; // mushy sound
-                }
-            }
+            if (defenseCache != null && defenseCache.isBlocking) defenseCache.StopBlock();
+            if (bowCache == null) bowCache = BowAndArrowSystem.Instance;
+            if (bowCache == null) return;
+
+            if (router.SecondaryDownThisFrame) bowCache.StartAiming();
+            if (router.SecondaryHeld && bowCache.IsAiming) bowCache.UpdateAimTick();
+            if (router.SecondaryUpThisFrame && bowCache.IsAiming) bowCache.ReleaseArrow();
+            return;
         }
-        
-        return "none";
+
+        // 2. Lanca Celta (308): Segurar secundario para mirar e arremessar
+        if (CurrentWeaponID == 308)
+        {
+            if (router.SecondaryDownThisFrame)
+            {
+                isAimingSpear = true;
+                spearChargeTimer = 0f;
+                if (FirstPersonViewmodelController.Instance != null)
+                    FirstPersonViewmodelController.Instance.SetSpearAim(true, 0.1f);
+            }
+
+            if (isAimingSpear && router.SecondaryHeld)
+            {
+                spearChargeTimer = Mathf.Min(spearChargeTimer + Time.deltaTime, maxSpearChargeTime);
+                float charge01 = spearChargeTimer / maxSpearChargeTime;
+                if (FirstPersonViewmodelController.Instance != null)
+                    FirstPersonViewmodelController.Instance.SetSpearAim(true, charge01);
+                if (FirstPersonCamera.Instance != null)
+                    FirstPersonCamera.Instance.SetAimFOVOverride(Mathf.Lerp(62f, 48f, charge01));
+            }
+
+            if (isAimingSpear && router.SecondaryUpThisFrame)
+            {
+                ThrowCelticSpear();
+            }
+            return;
+        }
+
+        // 3. Bloqueio e Parry (Escudo 309 / Armas brancas / Punhos)
+        if (defenseCache == null) defenseCache = PlayerMeleeCombatDefense.Instance;
+        if (defenseCache != null)
+        {
+            if (router.SecondaryDownThisFrame) defenseCache.StartBlock();
+            else if (!router.SecondaryHeld && defenseCache.isBlocking) defenseCache.StopBlock();
+        }
     }
-    
-    private void ResetWeaponRotation()
+
+    private void CancelSpearAim()
     {
-        if (currentWeaponInstance != null)
+        isAimingSpear = false;
+        spearChargeTimer = 0f;
+        if (FirstPersonViewmodelController.Instance != null)
+            FirstPersonViewmodelController.Instance.SetSpearAim(false, 0f);
+        if (FirstPersonCamera.Instance != null)
+            FirstPersonCamera.Instance.SetAimFOVOverride(-1f);
+    }
+
+    private void ThrowCelticSpear()
+    {
+        float charge01 = Mathf.Clamp01(spearChargeTimer / maxSpearChargeTime);
+        CancelSpearAim();
+
+        if (charge01 < 0.18f) return;
+
+        Camera cam = Camera.main;
+        if (cam == null) return;
+
+        if (inventory != null)
         {
-            currentWeaponInstance.transform.localRotation = Quaternion.identity;
+            inventory.RemoveItem(308, 1);
         }
+
+        Vector3 dir = cam.transform.forward;
+        Vector3 spawnPos = cam.transform.position + dir * 0.7f + cam.transform.right * 0.16f - cam.transform.up * 0.05f;
+        float speed = Mathf.Lerp(18f, 34f, charge01);
+        float dmg = Mathf.Lerp(40f, 75f, charge01);
+
+        ThrownSpearProjectile.Spawn(spawnPos, dir, speed, dmg, transform);
+
+        if (FirstPersonCamera.Instance != null)
+            FirstPersonCamera.Instance.AddShake(0.08f);
     }
 }
-

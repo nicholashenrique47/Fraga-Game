@@ -27,24 +27,24 @@ Material:
     serializedVersion: 3
     m_TexEnvs:
     - _BaseMap:
-        m_Texture: {fileID: 2800000, guid: fac75e35e544dcf4c9f07f58adcd3fc0, type: 2}
+        m_Texture: {fileID: 2800000, guid: 17538708cb0408044985e01aec9eaac1, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _BumpMap:
-        m_Texture: {fileID: 2800000, guid: f121db9fa422b1f47b211a9d9ba16aee, type: 2}
+        m_Texture: {fileID: 2800000, guid: 5f5474498366fd84ba991edd9920d528, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
-    - _Cutoff: 0.35
-    - _NormalScale: 1.35
+    - _Cutoff: 0.34
+    - _NormalScale: 1.3
     - _Smoothness: 0.24
     - _TranslucencyPower: 2.1
     - _WindBoughSpeed: 1.5
     - _WindLeafFlutter: 7
-    - _WindStrength: 0.12
+    - _WindStrength: 0.1
     m_Colors:
-    - _BaseColor: {r: 0.2, g: 0.44, b: 0.16, a: 1}
-    - _TranslucencyColor: {r: 0.66, g: 0.78, b: 0.16, a: 1}
+    - _BaseColor: {r: 0.94, g: 0.98, b: 0.92, a: 1}
+    - _TranslucencyColor: {r: 0.66, g: 0.82, b: 0.18, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

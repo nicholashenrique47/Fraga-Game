@@ -26,8 +26,8 @@ public class EntityEventSystem : MonoBehaviour
     [Header("Core Dependencies")]
     public SanitySystem sanitySystem; // Para aplicar os debuffs
     private System.IntPtr mapDataPtr;
-    private int mapWidth = 100;
-    private int mapHeight = 100;
+    private int mapWidth = FragaWorldBlueprint.DefaultWidth;
+    private int mapHeight = FragaWorldBlueprint.DefaultHeight;
 
     public void Initialize(System.IntPtr ptr, int width, int height)
     {
@@ -57,6 +57,7 @@ public class EntityEventSystem : MonoBehaviour
     {
         if (trasnoTransform != null)
         {
+            spawnPos.y = TerrainMeshGenerator.GetTerrainHeight(spawnPos.x, spawnPos.z);
             trasnoTransform.position = spawnPos;
             trasnoTargetPos = spawnPos;
             trasnoTransform.gameObject.SetActive(true);
@@ -75,7 +76,9 @@ public class EntityEventSystem : MonoBehaviour
         if (!isTrasnoActive || mapDataPtr == System.IntPtr.Zero || trasnoTransform == null) return;
 
         // Verifica se o Trasno atingiu o tile atual para calcular o próximo passo no C++
-        if (Vector3.Distance(trasnoTransform.position, trasnoTargetPos) < 0.1f)
+        float dxT = trasnoTransform.position.x - trasnoTargetPos.x;
+        float dzT = trasnoTransform.position.z - trasnoTargetPos.z;
+        if (dxT * dxT + dzT * dzT < 0.04f)
         {
             int gridX = Mathf.RoundToInt(trasnoTransform.position.x);
             int gridY = Mathf.RoundToInt(trasnoTransform.position.z);
@@ -86,12 +89,14 @@ public class EntityEventSystem : MonoBehaviour
 
             if (foundPath == 1)
             {
-                trasnoTargetPos = new Vector3(targetX, 0f, targetY);
+                trasnoTargetPos = new Vector3(targetX, TerrainMeshGenerator.GetTerrainHeight(targetX, targetY), targetY);
             }
         }
 
         // Movimento visual fluido interpolado para 60FPS mobile
-        trasnoTransform.position = Vector3.MoveTowards(trasnoTransform.position, trasnoTargetPos, trasnoSpeed * Time.deltaTime);
+        Vector3 nextPos = Vector3.MoveTowards(trasnoTransform.position, trasnoTargetPos, trasnoSpeed * Time.deltaTime);
+        nextPos.y = TerrainMeshGenerator.GetTerrainHeight(nextPos.x, nextPos.z);
+        trasnoTransform.position = nextPos;
     }
 
     private void UpdateMeigasDebuff()

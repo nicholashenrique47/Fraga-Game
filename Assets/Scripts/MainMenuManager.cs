@@ -12,7 +12,7 @@ public class MainMenuManager : MonoBehaviour
     public UIManager uiManager;
     public AudioManager audioManager;
     public Camera mainCamera;
-    
+
     [Header("UI Panels")]
     public GameObject mainPanel;
     public GameObject newGamePanel;
@@ -36,13 +36,22 @@ public class MainMenuManager : MonoBehaviour
     [Header("Game Reference")]
     public GameManager gameManager;
 
-    private Vector3 gameCameraPos = new Vector3(50f, 15f, 40f); // Posicao de jogo isométrica
-    private Vector3 menuCameraPos = new Vector3(50f, 5f, 50f);  // Posicao cinematográfica rasteira
+    private Vector3 gameCameraPos = new Vector3(384f, 18f, 374f); // Posicao de jogo isométrica dinâmica
+    private Vector3 menuCameraPos = new Vector3(384f, 11f, 384f); // Posicao cinematográfica rasteira dinâmica
 
     private void Start()
     {
         Time.timeScale = 0f;
-        
+        FragaWorldBlueprint.EnsureInitialized();
+        AudioListener.volume = Mathf.Clamp01(PlayerPrefs.GetFloat("Fraga_MasterVolume", 1.0f));
+
+        if (gameManager == null) gameManager = FindAnyObjectByType<GameManager>();
+        float cx = gameManager != null ? gameManager.mapWidth * 0.5f : FragaWorldBlueprint.CrashCampPos.x;
+        float cz = gameManager != null ? gameManager.mapHeight * 0.5f : FragaWorldBlueprint.CrashCampPos.y;
+        float groundY = TerrainMeshGenerator.GetTerrainHeight(cx, cz);
+        menuCameraPos = new Vector3(cx, groundY + 5f, cz);
+        gameCameraPos = new Vector3(cx, groundY + 15f, cz - 10f);
+
         if (mainCamera == null) mainCamera = Camera.main;
 
         FirstPersonCamera fpCam = mainCamera != null ? mainCamera.GetComponent<FirstPersonCamera>() : null;
@@ -58,12 +67,12 @@ public class MainMenuManager : MonoBehaviour
             mainCamera.orthographic = false;
             mainCamera.clearFlags = CameraClearFlags.Skybox;
             mainCamera.transform.position = menuCameraPos;
-            mainCamera.transform.rotation = Quaternion.Euler(15f, 45f, 0f); 
+            mainCamera.transform.rotation = Quaternion.Euler(15f, 45f, 0f);
         }
 
         if (uiManager != null && uiManager.gameObject != this.gameObject)
         {
-            uiManager.gameObject.SetActive(false); 
+            uiManager.gameObject.SetActive(false);
         }
 
         SetupPanels();
@@ -103,10 +112,16 @@ public class MainMenuManager : MonoBehaviour
         if (btnBackFromNewGame != null) btnBackFromNewGame.onClick.AddListener(() => SwitchPanel(mainPanel));
 
         // === SETTINGS PANEL ===
-        if (btnBackFromSettings != null) btnBackFromSettings.onClick.AddListener(() => SwitchPanel(mainPanel));
-        if (masterVolumeSlider != null) 
+        if (btnBackFromSettings != null) btnBackFromSettings.onClick.AddListener(() => { PlayerPrefs.Save(); SwitchPanel(mainPanel); });
+        if (masterVolumeSlider != null)
         {
-            masterVolumeSlider.onValueChanged.AddListener((val) => { AudioListener.volume = val; });
+            masterVolumeSlider.value = AudioListener.volume;
+            masterVolumeSlider.onValueChanged.AddListener((val) =>
+            {
+                float clamped = Mathf.Clamp01(val);
+                AudioListener.volume = clamped;
+                PlayerPrefs.SetFloat("Fraga_MasterVolume", clamped);
+            });
         }
     }
 
@@ -137,7 +152,7 @@ public class MainMenuManager : MonoBehaviour
         // Apaga o save antigo e comeca de novo
         string savePath = Application.persistentDataPath + "/fraga_save_v2.dat";
         if (System.IO.File.Exists(savePath)) System.IO.File.Delete(savePath);
-        
+
         int parsedSeed = 1913; // Default
         if (seedInput != null && !string.IsNullOrEmpty(seedInput.text))
         {
@@ -166,13 +181,13 @@ public class MainMenuManager : MonoBehaviour
         {
             t += Time.unscaledDeltaTime * 2.0f;
             if (mainMenuCanvasGroup != null) mainMenuCanvasGroup.alpha = 1f - t;
-            
+
             if (mainCamera != null && !isFirstPerson)
             {
                 mainCamera.transform.position = Vector3.Lerp(menuCameraPos, gameCameraPos, t);
                 mainCamera.transform.rotation = Quaternion.Lerp(Quaternion.Euler(15f, 45f, 0f), Quaternion.Euler(45f, 45f, 0f), t);
             }
-            
+
             yield return null;
         }
 
@@ -190,12 +205,12 @@ public class MainMenuManager : MonoBehaviour
             mainCamera.transform.localRotation = Quaternion.identity;
         }
 
-        if (uiManager != null) uiManager.gameObject.SetActive(true); 
+        if (uiManager != null) uiManager.gameObject.SetActive(true);
 
         Time.timeScale = 1f;
 
         // Garante enquadramento imediato no jogador pelo IsometricCamera se estiver em modo isométrico
-        var isoCam = mainCamera != null ? mainCamera.GetComponent<IsometricCamera>() : FindFirstObjectByType<IsometricCamera>();
+        var isoCam = mainCamera != null ? mainCamera.GetComponent<IsometricCamera>() : FindAnyObjectByType<IsometricCamera>();
         if (isoCam != null && !isFirstPerson)
         {
             isoCam.SnapToTarget();

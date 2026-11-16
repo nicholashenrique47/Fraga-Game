@@ -28,6 +28,7 @@ public class GalicianWeatherEngine : MonoBehaviour
     public GalicianWeatherState currentState = GalicianWeatherState.Orballo;
     [Range(0f, 1f)] public float globalWetness = 0.5f;
     public float transitionDuration = 6.0f;
+    public float autoWeatherInterval = 110f;
 
     public bool isRaining => currentState == GalicianWeatherState.Orballo || currentState == GalicianWeatherState.Trevoada;
 
@@ -37,11 +38,13 @@ public class GalicianWeatherEngine : MonoBehaviour
     private static readonly int WindTurbulenceID = Shader.PropertyToID("_WindTurbulence");
 
     private Coroutine activeTransitionCoroutine;
+    private float nextAutoWeatherTime = 95f;
 
     void Awake()
     {
         if (Instance == null) Instance = this;
         ApplyInstantWeather(currentState);
+        nextAutoWeatherTime = Time.time + autoWeatherInterval;
     }
 
     void Update()
@@ -49,6 +52,38 @@ public class GalicianWeatherEngine : MonoBehaviour
         // Propaga a variável global de molhado para todos os shaders PBR de terreno, rocha e folhagem
         Shader.SetGlobalFloat(GlobalWetnessID, globalWetness);
         Shader.SetGlobalFloat(GlobalRainWetnessID, globalWetness);
+
+        if (!Application.isPlaying) return;
+
+        if (Time.time >= nextAutoWeatherTime)
+        {
+            nextAutoWeatherTime = Time.time + autoWeatherInterval;
+            bool isNight = DayNightCycle.Instance != null && DayNightCycle.Instance.IsNight();
+            float r = Random.value;
+            GalicianWeatherState next = isNight
+                ? (r < 0.38f ? GalicianWeatherState.LuarEspectral : (r < 0.68f ? GalicianWeatherState.NeboaMeiga : (r < 0.86f ? GalicianWeatherState.Orballo : GalicianWeatherState.Trevoada)))
+                : (r < 0.42f ? GalicianWeatherState.SolDeOutono : (r < 0.72f ? GalicianWeatherState.Orballo : (r < 0.88f ? GalicianWeatherState.NeboaMeiga : GalicianWeatherState.Trevoada)));
+
+            if (next != currentState)
+            {
+                TransitionTo(next);
+                if (HUDSurvivalOverlay.Instance != null)
+                {
+                    string label = next == GalicianWeatherState.Trevoada ? "Tempestade Atlantica se aproxima!"
+                        : (next == GalicianWeatherState.NeboaMeiga ? "Nevoeiro denso cobre a Fraga..."
+                        : (next == GalicianWeatherState.Orballo ? "Chuva miuda galega comecou."
+                        : (next == GalicianWeatherState.SolDeOutono ? "O ceu abriu em Sol de Outono." : "Luar espectral ilumina a noite.")));
+                    HUDSurvivalOverlay.Instance.ShowLootTooltip(label);
+                }
+            }
+        }
+
+        if ((currentState == GalicianWeatherState.Trevoada || currentState == GalicianWeatherState.NeboaMeiga) &&
+            PlayerStatus.Instance != null && !PlayerStatus.Instance.isNearBonfire)
+        {
+            var san = PlayerStatus.Instance.sanitySystem;
+            if (san != null) san.sanity = Mathf.Max(0f, san.sanity - 0.22f * Time.deltaTime);
+        }
     }
 
     public void TransitionTo(GalicianWeatherState newState)

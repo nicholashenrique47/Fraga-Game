@@ -25,34 +25,35 @@ Material:
     serializedVersion: 3
     m_TexEnvs:
     - _BaseMap:
-        m_Texture: {fileID: 2800000, guid: 7dadf4adbe954c14aa994630544bda80, type: 2}
+        m_Texture: {fileID: 2800000, guid: 491591b08295cdc4a9afaa356740bb18, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _BumpMap:
-        m_Texture: {fileID: 2800000, guid: 48241219604c509479de4f4318afb37a, type: 2}
+        m_Texture: {fileID: 2800000, guid: 58444195b2b3ab143bc2783b500084a5, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _DetailNormalMap:
-        m_Texture: {fileID: 2800000, guid: b5ff5a02cac3ae54d8a4132f6ebbc109, type: 2}
+        m_Texture: {fileID: 2800000, guid: 41e289128fac55542a322ddce9fa639d, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _RockMap:
-        m_Texture: {fileID: 2800000, guid: 8184a946488dbdb4abe112578495a429, type: 2}
+        m_Texture: {fileID: 2800000, guid: 443c56c87f62eae4aada18e474c54b2f, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _RockNormalMap:
-        m_Texture: {fileID: 2800000, guid: 4ac5e7f3e36597a4484e7f7c581f4bdd, type: 2}
+        m_Texture: {fileID: 2800000, guid: 70b333c43cdad6d4bbe9c4b955dc386d, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
-    - _BaseSmoothness: 0.12
+    - _BaseSmoothness: 0.14
     - _BumpScale: 1.35
-    - _DetailNormalScale: 0.8
+    - _DetailNormalScale: 0.85
     - _DetailTiling: 3.4
     - _PuddleDepthThreshold: 0.35
-    - _RockSlopeThreshold: 0.52
-    - _WetSmoothness: 0.88
+    - _RockSlopeThreshold: 0.42
+    - _RockTriplanarScale: 0.35
+    - _WetSmoothness: 0.9
     m_Colors:
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
   m_BuildTextureStacks: []

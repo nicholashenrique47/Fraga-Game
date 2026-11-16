@@ -1,12 +1,14 @@
 ﻿using UnityEngine;
 
 /// <summary>
-/// Controlador de Acústica Atmosférica e Oclusão de Copas (Canopy Occlusion).
-/// Filtra dinamicamente as frequências sonoras com Low-Pass Filter quando o jogador
-/// está sob carvalhos densos, dentro de um hórreo ou em cavernas de pedra.
+/// Controlador de Acustica Atmosferica e Oclusao de Copas (Canopy Occlusion).
+/// Filtra dinamicamente as frequencias sonoras com Low-Pass Filter quando o jogador
+/// esta sob carvalhos densos, dentro de um horreo ou em cavernas de pedra, e adapta vento/chuva por regiao.
 /// </summary>
 public class GalicianAudioAtmosphere : MonoBehaviour
 {
+    public static GalicianAudioAtmosphere Instance { get; private set; }
+
     [Header("Fontes de Audio")]
     public AudioSource windSource;
     public AudioSource rainSource;
@@ -14,7 +16,7 @@ public class GalicianAudioAtmosphere : MonoBehaviour
 
     [Header("Deteccao de Copas e Abrigo")]
     public Transform playerHead;
-    public LayerMask canopyLayerMask = ~0; // Default para qualquer obstaculo superior se nao especificado
+    public LayerMask canopyLayerMask = ~0;
     public float checkDistance = 15.0f;
     public float openAirCutoff = 18000.0f;
     public float shelteredCutoff = 2800.0f;
@@ -22,6 +24,14 @@ public class GalicianAudioAtmosphere : MonoBehaviour
 
     [Header("Status em Tempo Real")]
     public bool isSheltered = false;
+
+    private float nextSenseTime = 0f;
+    private FragaWorldBlueprint.WorldRegion cachedRegion = FragaWorldBlueprint.WorldRegion.OakForest;
+
+    void Awake()
+    {
+        if (Instance == null) Instance = this;
+    }
 
     void Start()
     {
@@ -50,20 +60,44 @@ public class GalicianAudioAtmosphere : MonoBehaviour
     {
         if (playerHead == null) return;
 
-        // Dispara raycast vertical para cima para checar presenca de folhagem ou teto
-        isSheltered = Physics.Raycast(playerHead.position, Vector3.up, out RaycastHit hit, checkDistance, canopyLayerMask);
+        if (Time.time >= nextSenseTime)
+        {
+            nextSenseTime = Time.time + 0.14f;
+            isSheltered = Physics.Raycast(playerHead.position, Vector3.up, out _, checkDistance, canopyLayerMask);
+            cachedRegion = FragaWorldBlueprint.GetRegion(playerHead.position.x, playerHead.position.z);
+            if (cachedRegion == FragaWorldBlueprint.WorldRegion.SacredCave)
+            {
+                isSheltered = true;
+            }
+        }
 
         if (lowPassFilter != null)
         {
-            float targetFreq = isSheltered ? shelteredCutoff : openAirCutoff;
+            float targetFreq = isSheltered
+                ? (cachedRegion == FragaWorldBlueprint.WorldRegion.SacredCave ? shelteredCutoff * 0.72f : shelteredCutoff)
+                : openAirCutoff;
             lowPassFilter.cutoffFrequency = Mathf.Lerp(lowPassFilter.cutoffFrequency, targetFreq, Time.deltaTime * filterLerpSpeed);
         }
 
-        // Se estiver sob abrigo, o som do vento diminui e o som de gotejamento de chuva fica mais intimo
+        bool exposedCoastOrPeak = cachedRegion == FragaWorldBlueprint.WorldRegion.AtlanticCoast ||
+                                  cachedRegion == FragaWorldBlueprint.WorldRegion.FarolBluff ||
+                                  cachedRegion == FragaWorldBlueprint.WorldRegion.MountainSummit;
+
         if (windSource != null)
         {
-            float targetWindVol = isSheltered ? 0.25f : 0.75f;
-            windSource.volume = Mathf.Lerp(windSource.volume, targetWindVol, Time.deltaTime * 2.0f);
+            float baseWind = isSheltered ? 0.20f : (exposedCoastOrPeak ? 0.88f : 0.62f);
+            float weatherBoost = GalicianWeatherEngine.Instance != null && GalicianWeatherEngine.Instance.currentState == GalicianWeatherState.Trevoada ? 1.25f : 1.0f;
+            windSource.volume = Mathf.Lerp(windSource.volume, Mathf.Clamp01(baseWind * weatherBoost), Time.deltaTime * 2.0f);
+            windSource.pitch = Mathf.Lerp(windSource.pitch, exposedCoastOrPeak ? 1.06f : (isSheltered ? 0.86f : 1.0f), Time.deltaTime * 2.0f);
+        }
+
+        if (rainSource != null)
+        {
+            float wet = GalicianWeatherEngine.Instance != null && GalicianWeatherEngine.Instance.isRaining
+                ? GalicianWeatherEngine.Instance.globalWetness
+                : 0f;
+            float shelterScale = isSheltered ? 0.45f : 0.90f;
+            rainSource.volume = Mathf.Lerp(rainSource.volume, wet * shelterScale * 0.55f, Time.deltaTime * 2.5f);
         }
     }
 }

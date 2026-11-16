@@ -88,7 +88,10 @@ public class WildlifeAIEngine : MonoBehaviour
         switch (currentState)
         {
             case AIState.Idle:
-                if (distToPlayer < visionDistance && CanSeePlayer())
+                float stealthMult = FragaStealthSystem.Instance != null ? FragaStealthSystem.Instance.GetDetectionMultiplier() : 1f;
+                float effectiveVision = visionDistance * stealthMult;
+                bool heardPlayer = FragaStealthSystem.Instance != null && FragaStealthSystem.Instance.Noise01 > 0.68f && distToPlayer < 14f;
+                if ((distToPlayer < effectiveVision && CanSeePlayer(distToPlayer)) || heardPlayer)
                 {
                     currentState = (creatureType == CreatureType.Deer) ? AIState.FleeingFire : AIState.Orbiting;
                     if (audioSource != null && growlClip != null) audioSource.PlayOneShot(growlClip, 0.7f);
@@ -201,6 +204,14 @@ public class WildlifeAIEngine : MonoBehaviour
     private void SpawnCarcassDrops()
     {
         Vector3 pos = transform.position + Vector3.up * 0.2f;
+        int meatQty = (creatureType == CreatureType.WildBoar) ? 3 : 2;
+
+        if (LootManager.Instance != null)
+        {
+            LootManager.Instance.DropItem(104, meatQty, pos + Vector3.right * 0.25f);
+            LootManager.Instance.DropItem(114, 1, pos - Vector3.right * 0.25f);
+            return;
+        }
 
         // Drop 1: Carne Crua (Item 104)
         GameObject meat = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -209,7 +220,7 @@ public class WildlifeAIEngine : MonoBehaviour
         meat.transform.localScale = new Vector3(0.2f, 0.15f, 0.2f);
         ResourcePickup p1 = meat.AddComponent<ResourcePickup>();
         p1.itemID = 104;
-        p1.amount = (creatureType == CreatureType.WildBoar) ? 3 : 2;
+        p1.amount = meatQty;
 
         // Drop 2: Pele Animal (Item 114)
         GameObject pelt = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -221,11 +232,14 @@ public class WildlifeAIEngine : MonoBehaviour
         p2.amount = 1;
     }
 
-    private bool CanSeePlayer()
+    private bool CanSeePlayer(float distToPlayer)
     {
+        if (distToPlayer < 4.5f) return true;
         Vector3 toPlayer = (playerTransform.position - transform.position).normalized;
         float angle = Vector3.Angle(transform.forward, toPlayer);
-        return angle < (visionAngle * 0.5f);
+        float fovHalf = visionAngle * 0.5f;
+        if (FragaStealthSystem.Instance != null && FragaStealthSystem.Instance.IsHidden) fovHalf *= 0.65f;
+        return angle < fovHalf;
     }
 
     private bool CheckForFireNear()

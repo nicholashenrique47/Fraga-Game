@@ -103,10 +103,15 @@ public class SanityVisualsManager : MonoBehaviour
             {
                 // Aparecem randomicamente nas beiras da visão
                 Vector2 randomCircle = Random.insideUnitCircle.normalized * Random.Range(5f, 12f);
-                Vector3 spawnPos = playerPos + new Vector3(randomCircle.x, 0, randomCircle.y);
+                float wx = playerPos.x + randomCircle.x;
+                float wz = playerPos.z + randomCircle.y;
+                float wy = TerrainMeshGenerator.GetTerrainHeight(wx, wz);
+                Vector3 spawnPos = new Vector3(wx, wy, wz);
                 
                 // Rotação encarando o jogador mas estática
-                Quaternion rot = Quaternion.LookRotation(playerPos - spawnPos);
+                Vector3 lookDir = playerPos - spawnPos;
+                lookDir.y = 0f;
+                Quaternion rot = lookDir.sqrMagnitude > 0.01f ? Quaternion.LookRotation(lookDir) : Quaternion.identity;
                 
                 // Escala distorcida (Slimer/Taller) para parecer assustador
                 Vector3 scale = new Vector3(Random.Range(0.5f, 1.5f), Random.Range(1.5f, 3f), Random.Range(0.5f, 1.5f));

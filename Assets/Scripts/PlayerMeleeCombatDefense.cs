@@ -1,7 +1,8 @@
 ﻿using UnityEngine;
 
 /// <summary>
-/// PlayerMeleeCombatDefense: Sistema tático de Bloqueio, Aparo Perfeito (Parry) e Hitstop cinematográfico.
+/// PlayerMeleeCombatDefense: Bloqueio tatico, Aparo Perfeito (Parry), sinergia com Escudo (309) e Hitstop seguro via GameFeelManager.
+/// Entrada controlada centralmente pelo EquipmentSystem / FragaInputRouter (sem conflito com KeyCode.Q).
 /// </summary>
 public class PlayerMeleeCombatDefense : MonoBehaviour
 {
@@ -9,14 +10,15 @@ public class PlayerMeleeCombatDefense : MonoBehaviour
 
     [Header("Defense Settings")]
     public float blockDamageReduction = 0.70f;
+    public float shieldDamageReduction = 0.85f;
     public float blockStaminaCost = 18f;
     public float parryWindow = 0.18f;
+    public float shieldParryWindow = 0.25f;
     public float counterMultiplier = 2.50f;
-    public float parryBuffDuration = 1.6f;
+    public float parryBuffDuration = 1.8f;
 
     [Header("Dependencies")]
     public PlayerStatus playerStatus;
-    public WeaponMotionSway weaponSway;
 
     public bool isBlocking { get; private set; }
     public bool hasParryBonus { get; private set; }
@@ -26,6 +28,8 @@ public class PlayerMeleeCombatDefense : MonoBehaviour
     private AudioSource audioSource;
     private AudioClip blockClip;
     private AudioClip parryClip;
+    private HapticManager hapticCache;
+    private InventoryAdvanced inventoryCache;
 
     private void Awake()
     {
@@ -35,9 +39,9 @@ public class PlayerMeleeCombatDefense : MonoBehaviour
 
     private void Start()
     {
-        if (playerStatus == null) playerStatus = GetComponent<PlayerStatus>();
-        if (playerStatus == null) playerStatus = FindAnyObjectByType<PlayerStatus>();
-        if (weaponSway == null) weaponSway = FindAnyObjectByType<WeaponMotionSway>();
+        if (playerStatus == null) playerStatus = PlayerStatus.Instance ?? GetComponent<PlayerStatus>() ?? FindAnyObjectByType<PlayerStatus>();
+        hapticCache = FindAnyObjectByType<HapticManager>();
+        inventoryCache = InventoryAdvanced.Instance ?? FindAnyObjectByType<InventoryAdvanced>();
     }
 
     private void SetupAudio()
@@ -52,23 +56,6 @@ public class PlayerMeleeCombatDefense : MonoBehaviour
 
     private void Update()
     {
-        // Entrada PC: Botão Direito do Mouse mantém a guarda levantada
-        // Se estiver com arco em mãos, o arco usa o botão direito, caso contrário entra em guarda
-        BowAndArrowSystem bow = BowAndArrowSystem.Instance != null ? BowAndArrowSystem.Instance : FindAnyObjectByType<BowAndArrowSystem>();
-        bool hasBowAim = bow != null && Input.GetMouseButton(1);
-
-        if (!hasBowAim)
-        {
-            if (Input.GetMouseButtonDown(1) || Input.GetKeyDown(KeyCode.Q))
-            {
-                StartBlock();
-            }
-            else if (Input.GetMouseButtonUp(1) || Input.GetKeyUp(KeyCode.Q))
-            {
-                StopBlock();
-            }
-        }
-
         if (hasParryBonus)
         {
             parryBonusTimer -= Time.deltaTime;
@@ -82,20 +69,25 @@ public class PlayerMeleeCombatDefense : MonoBehaviour
     public void StartBlock()
     {
         if (isBlocking) return;
-        if (playerStatus != null && playerStatus.stamina < 10f) return;
+        if (playerStatus != null && playerStatus.stamina < 8f) return;
 
         isBlocking = true;
         blockStartTime = Time.time;
 
-        if (weaponSway != null)
+        if (FirstPersonViewmodelController.Instance != null)
         {
-            weaponSway.TriggerAttackMotion(); // Postura defensiva elevada
+            FirstPersonViewmodelController.Instance.SetGuardPose(true);
         }
     }
 
     public void StopBlock()
     {
+        if (!isBlocking) return;
         isBlocking = false;
+        if (FirstPersonViewmodelController.Instance != null)
+        {
+            FirstPersonViewmodelController.Instance.SetGuardPose(false);
+        }
     }
 
     public void ConsumeParryBonus()
@@ -104,21 +96,25 @@ public class PlayerMeleeCombatDefense : MonoBehaviour
         parryBonusTimer = 0f;
     }
 
-    /// <summary>
-    /// Processa o dano recebido verificando se houve bloqueio ou Parry perfeito.
-    /// Retorna o valor de dano final reduzido ou 0 se aparado.
-    /// </summary>
     public float ProcessIncomingDamage(float rawDamage)
     {
         if (!isBlocking) return rawDamage;
 
+        if (inventoryCache == null) inventoryCache = InventoryAdvanced.Instance;
+        bool hasShield = inventoryCache != null && inventoryCache.equippedOffHandId == 309;
+        float effectiveParryWindow = hasShield ? shieldParryWindow : parryWindow;
+        float effectiveReduction = hasShield ? shieldDamageReduction : blockDamageReduction;
+
         float timeSinceBlock = Time.time - blockStartTime;
 
-        // === 1. PARRY PERFEITO (Dentro da janela de 0.18s) ===
-        if (timeSinceBlock <= parryWindow)
+        // 1. PARRY PERFEITO
+        if (timeSinceBlock <= effectiveParryWindow)
         {
             hasParryBonus = true;
             parryBonusTimer = parryBuffDuration;
+
+            if (FirstPersonViewmodelController.Instance != null)
+                FirstPersonViewmodelController.Instance.TriggerParrySnap();
 
             if (audioSource != null && parryClip != null)
             {
@@ -127,32 +123,29 @@ public class PlayerMeleeCombatDefense : MonoBehaviour
             }
 
             if (FirstPersonCamera.Instance != null)
-            {
                 FirstPersonCamera.Instance.AddShake(0.14f);
-            }
 
-            HapticManager haptic = FindAnyObjectByType<HapticManager>();
-            if (haptic != null) haptic.TriggerLightVibration();
+            if (hapticCache != null) hapticCache.TriggerLightVibration();
 
-            // Congelamento temporal cinematográfico (Hitstop de 0.04s)
-            StartCoroutine(PerformHitstop(0.04f));
+            if (GameFeelManager.Instance != null)
+                GameFeelManager.Instance.TriggerHitstop(0.055f, 0.06f);
 
-            HUDSurvivalOverlay hud = FindAnyObjectByType<HUDSurvivalOverlay>();
-            if (hud != null) hud.ShowLootTooltip("<color=#00FFCC>★ APARO PERFEITO (PARRY)! Contra-ataque 2.5x</color>");
+            if (HUDSurvivalOverlay.Instance != null)
+                HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#55FFDD>APARO PERFEITO (PARRY)! Contra-ataque 2.5x</color>");
 
-            return 0f; // Dano zero
+            return 0f;
         }
 
-        // === 2. BLOQUEIO NORMAL (Redução de 70%) ===
+        // 2. BLOQUEIO NORMAL
+        float staminaDrain = hasShield ? blockStaminaCost * 0.65f : blockStaminaCost;
         if (playerStatus != null)
         {
-            playerStatus.stamina = Mathf.Max(0, playerStatus.stamina - blockStaminaCost);
+            playerStatus.stamina = Mathf.Max(0f, playerStatus.stamina - staminaDrain);
             if (playerStatus.stamina <= 0f)
             {
-                // Quebra de guarda por falta de estamina
                 StopBlock();
-                HUDSurvivalOverlay hud = FindAnyObjectByType<HUDSurvivalOverlay>();
-                if (hud != null) hud.ShowLootTooltip("<color=#FF4444>Guarda Quebrada (Sem Estamina)!</color>");
+                if (HUDSurvivalOverlay.Instance != null)
+                    HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#FF5555>Guarda Quebrada (Sem Estamina)!</color>");
             }
         }
 
@@ -163,22 +156,13 @@ public class PlayerMeleeCombatDefense : MonoBehaviour
         }
 
         if (FirstPersonCamera.Instance != null)
-        {
             FirstPersonCamera.Instance.AddShake(0.08f);
-        }
 
-        return rawDamage * (1f - blockDamageReduction);
+        if (FirstPersonViewmodelController.Instance != null)
+            FirstPersonViewmodelController.Instance.TriggerBlockImpact();
+
+        return rawDamage * (1f - effectiveReduction);
     }
-
-    private System.Collections.IEnumerator PerformHitstop(float duration)
-    {
-        float prevTimeScale = Time.timeScale;
-        Time.timeScale = 0.05f;
-        yield return new WaitForSecondsRealtime(duration);
-        Time.timeScale = prevTimeScale;
-    }
-
-    // =================== SÍNTESE PROCEDURAL DE ÁUDIO ===================
 
     private AudioClip GenerateBlockSound()
     {
@@ -186,7 +170,6 @@ public class PlayerMeleeCombatDefense : MonoBehaviour
         float dur = 0.22f;
         int count = (int)(sampleRate * dur);
         float[] samples = new float[count];
-
         for (int i = 0; i < count; i++)
         {
             float t = (float)i / count;
@@ -194,7 +177,6 @@ public class PlayerMeleeCombatDefense : MonoBehaviour
             float scrape = Random.Range(-0.3f, 0.3f) * Mathf.Exp(-10f * t);
             samples[i] = thud + scrape;
         }
-
         AudioClip clip = AudioClip.Create("BlockImpact_Procedural", count, 1, sampleRate, false);
         clip.SetData(samples, 0);
         return clip;
@@ -206,17 +188,14 @@ public class PlayerMeleeCombatDefense : MonoBehaviour
         float dur = 0.35f;
         int count = (int)(sampleRate * dur);
         float[] samples = new float[count];
-
         for (int i = 0; i < count; i++)
         {
             float t = (float)i / count;
-            // Choque agudo e ressonância metálica
             float ring1 = Mathf.Sin(2f * Mathf.PI * 880f * ((float)i / sampleRate)) * Mathf.Exp(-7f * t) * 0.5f;
             float ring2 = Mathf.Sin(2f * Mathf.PI * 1760f * ((float)i / sampleRate)) * Mathf.Exp(-12f * t) * 0.35f;
             float burst = Random.Range(-0.4f, 0.4f) * Mathf.Exp(-35f * t) * 0.4f;
             samples[i] = ring1 + ring2 + burst;
         }
-
         AudioClip clip = AudioClip.Create("ParryClink_Procedural", count, 1, sampleRate, false);
         clip.SetData(samples, 0);
         return clip;

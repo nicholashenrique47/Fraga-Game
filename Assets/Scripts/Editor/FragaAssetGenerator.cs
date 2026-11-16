@@ -343,6 +343,7 @@ public class FragaAssetGenerator : MonoBehaviour
 
     private static void GeneratePlayerPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Entities/Player_Character.obj")) return;
         GameObject playerObj = new GameObject("Player_Prefab");
         
         // Torso
@@ -411,6 +412,7 @@ public class FragaAssetGenerator : MonoBehaviour
 
     private static void GenerateVultoPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Entities/Vulto_Entity.obj")) return;
         GameObject vultoObj = new GameObject("Vulto_Prefab");
         
         GameObject body = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
@@ -437,6 +439,7 @@ public class FragaAssetGenerator : MonoBehaviour
 
     private static void GenerateStalkerPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Entities/Stalker_Entity.obj")) return;
         GameObject vultoObj = new GameObject("Stalker_Prefab");
         
         GameObject body = GameObject.CreatePrimitive(PrimitiveType.Capsule);
@@ -470,6 +473,7 @@ public class FragaAssetGenerator : MonoBehaviour
 
     private static void GenerateHerbPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Props/Herb_Cluster.obj")) return;
         GameObject herbObj = new GameObject("Herb_Prefab");
 
         // Talo central flexível
@@ -513,6 +517,7 @@ public class FragaAssetGenerator : MonoBehaviour
 
     private static void GenerateMushroomPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Vegetation/Mushroom_Cluster.obj")) return;
         GameObject mushObj = new GameObject("Mushroom_Prefab");
 
         // Haste carnuda com textura esbranquiçada
@@ -548,6 +553,7 @@ public class FragaAssetGenerator : MonoBehaviour
 
     private static void GenerateBerryPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Vegetation/Berry_Bush.obj")) return;
         GameObject berryBushObj = new GameObject("Berry_Prefab");
 
         // Folhagem densa do arbusto
@@ -585,6 +591,7 @@ public class FragaAssetGenerator : MonoBehaviour
 
     private static void GenerateAxePrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Weapons/Survival_Axe.obj")) return;
         GameObject axeObj = new GameObject("Axe_Prefab");
 
         // Cabo ergonômico de madeira entalhada (Ash/Freixo)
@@ -645,6 +652,7 @@ public class FragaAssetGenerator : MonoBehaviour
 
     private static void GenerateTorchPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Weapons/Torch.obj")) return;
         GameObject torchObj = new GameObject("Torch_Prefab");
 
         // Cabo de ramo entalhado orgânico
@@ -696,6 +704,7 @@ public class FragaAssetGenerator : MonoBehaviour
     
     private static void GeneratePickaxePrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Weapons/Pickaxe.obj")) return;
         GameObject pickaxeObj = new GameObject("Pickaxe_Prefab");
 
         // Cabo longo de freixo com curva ergonômica
@@ -730,6 +739,7 @@ public class FragaAssetGenerator : MonoBehaviour
     
     private static void GenerateLanternPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Weapons/Lantern.obj")) return;
         GameObject lanternObj = new GameObject("Lantern_Prefab");
 
         // Base de ferro fundido com reservatório de óleo
@@ -798,6 +808,7 @@ public class FragaAssetGenerator : MonoBehaviour
     
     private static void GenerateBandagePrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Props/Bandage_Roll.obj")) return;
         GameObject bandageObj = new GameObject("Bandage_Prefab");
         
         GameObject roll = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
@@ -812,6 +823,7 @@ public class FragaAssetGenerator : MonoBehaviour
     
     private static void GenerateBowPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Weapons/Bow.obj")) return;
         GameObject bowObj = new GameObject("Bow_Prefab");
         
         // Curved arc
@@ -834,6 +846,7 @@ public class FragaAssetGenerator : MonoBehaviour
     
     private static void GenerateArrowPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Weapons/Arrow.obj")) return;
         GameObject arrowObj = new GameObject("Arrow_Prefab");
         
         // Shaft
@@ -857,6 +870,7 @@ public class FragaAssetGenerator : MonoBehaviour
     
     private static void GenerateFishingRodPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Weapons/Fishing_Rod.obj")) return;
         GameObject rodObj = new GameObject("FishingRod_Prefab");
         
         GameObject pole = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
@@ -878,6 +892,7 @@ public class FragaAssetGenerator : MonoBehaviour
     
     private static void GenerateWaterCatcherPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Props/Water_Catcher.obj")) return;
         GameObject catcherObj = new GameObject("WaterCatcher_Prefab");
         
         // Base supports
@@ -906,6 +921,7 @@ public class FragaAssetGenerator : MonoBehaviour
     
     private static void GenerateWorkbenchPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Props/Workbench.obj")) return;
         GameObject benchObj = new GameObject("Workbench_Prefab");
         
         GameObject table = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -931,6 +947,7 @@ public class FragaAssetGenerator : MonoBehaviour
     
     private static void GeneratePondPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Props/Pond_Basin.obj")) return;
         GameObject pondObj = new GameObject("Pond_Prefab");
 
         // Margem de pedras e rochas graníticas com musgo
@@ -964,6 +981,7 @@ public class FragaAssetGenerator : MonoBehaviour
     
     private static void GenerateHoePrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Weapons/Hoe.obj")) return;
         GameObject hoeObj = new GameObject("Hoe_Prefab");
         
         GameObject handle = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
@@ -984,6 +1002,7 @@ public class FragaAssetGenerator : MonoBehaviour
     
     private static void GenerateCauldronPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Props/Cauldron.obj")) return;
         GameObject cauldronObj = new GameObject("Cauldron_Prefab");
         
         GameObject bowl = GameObject.CreatePrimitive(PrimitiveType.Sphere);
@@ -1010,6 +1029,7 @@ public class FragaAssetGenerator : MonoBehaviour
     
     private static void GenerateRabbitPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Fauna/Rabbit_Model.obj")) return;
         GameObject rabbitObj = new GameObject("Rabbit_Prefab");
         
         GameObject body = GameObject.CreatePrimitive(PrimitiveType.Capsule);
@@ -1047,6 +1067,7 @@ public class FragaAssetGenerator : MonoBehaviour
     
     private static void GenerateFarmlandPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Props/Farmland.obj")) return;
         GameObject farmObj = new GameObject("Farmland_Prefab");
         
         GameObject soil = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -1061,6 +1082,7 @@ public class FragaAssetGenerator : MonoBehaviour
     
     private static void GenerateSnareTrapPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Props/Snare_Trap.obj")) return;
         GameObject snareObj = new GameObject("SnareTrap_Prefab");
         
         GameObject wire = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
@@ -1083,6 +1105,7 @@ public class FragaAssetGenerator : MonoBehaviour
 
         private static void GenerateRunicStonePrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Rocks/Runic_Stone.obj")) return;
         GameObject obj = new GameObject("RunicStone_Prefab");
 
         // Monólito de granito antigo entalhado com 3 blocos irregulares
@@ -1117,6 +1140,7 @@ public class FragaAssetGenerator : MonoBehaviour
     
     private static void GenerateFallenLogPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Props/Fallen_Log.obj")) return;
         GameObject obj = new GameObject("FallenLog_Prefab");
 
         // Tronco caído oco e envelhecido
@@ -1195,6 +1219,7 @@ public class FragaAssetGenerator : MonoBehaviour
     
     private static void GenerateThornyBushPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Vegetation/Thorny_Bush.obj")) return;
         GameObject obj = new GameObject("ThornyBush_Prefab");
 
         // Galhos espinhosos cruzados na base
@@ -1242,6 +1267,7 @@ public class FragaAssetGenerator : MonoBehaviour
     
     private static void GenerateGlowMushroomPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Vegetation/Mushroom_Cluster.obj")) return;
         GameObject obj = new GameObject("GlowMushroom_Prefab");
         
         // Stem
@@ -1271,6 +1297,7 @@ public class FragaAssetGenerator : MonoBehaviour
     
     private static void GenerateCelticCrossPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Rocks/Celtic_Cross.obj")) return;
         GameObject obj = new GameObject("CelticCross_Prefab");
 
         // Base escalonada de 2 degraus
@@ -1325,6 +1352,7 @@ public class FragaAssetGenerator : MonoBehaviour
     
     private static void GenerateAncientGravePrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Rocks/Ancient_Grave.obj")) return;
         GameObject obj = new GameObject("AncientGrave_Prefab");
 
         // Lápide de pedra de xisto/granito fincada inclinada
@@ -1365,6 +1393,7 @@ public class FragaAssetGenerator : MonoBehaviour
 
         private static void GenerateWolfPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Fauna/Wolf_Model.obj")) return;
         GameObject wolfObj = new GameObject("Wolf_Prefab");
         
         // Body (Lean and aggressive)
@@ -1447,6 +1476,7 @@ public class FragaAssetGenerator : MonoBehaviour
 
         private static void GenerateDeerPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Fauna/Deer_Model.obj")) return;
         GameObject deerObj = new GameObject("Deer_Prefab");
         
         // Body (Tall and elegant)
@@ -1521,6 +1551,7 @@ public class FragaAssetGenerator : MonoBehaviour
 
     private static void GenerateBearPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Fauna/Bear_Model.obj")) return;
         GameObject bearObj = new GameObject("Bear_Prefab");
 
         // Corpo Macico e Pesado
@@ -1610,6 +1641,7 @@ public class FragaAssetGenerator : MonoBehaviour
 
     private static void GenerateBoarPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Fauna/Boar_Model.obj")) return;
         GameObject boarObj = new GameObject("Boar_Prefab");
 
         // Corpo Musculoso e Compacto
@@ -1707,6 +1739,7 @@ public class FragaAssetGenerator : MonoBehaviour
 
     private static void GenerateRuinPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Rocks/Celtic_Ruin.obj")) return;
         GameObject ruinObj = new GameObject("Ruin_Prefab");
 
         // 1. Pilares Megaliticos Verticais (Anta / Dolmen Celta da Galicia)
@@ -1764,6 +1797,7 @@ public class FragaAssetGenerator : MonoBehaviour
 
     private static void GenerateBossPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Entities/Boss_Anciao.obj")) return;
         GameObject bossObj = new GameObject("Boss_Prefab");
         
         // Body (Giant)
@@ -1824,6 +1858,7 @@ public class FragaAssetGenerator : MonoBehaviour
 
     private static void GenerateAltarPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Rocks/Stone_Altar.obj")) return;
         GameObject altarObj = new GameObject("Altar_Prefab");
 
         GameObject baseObj = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
@@ -1857,6 +1892,7 @@ public class FragaAssetGenerator : MonoBehaviour
 
     private static void GenerateFentoPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Vegetation/Fento_Fern.obj")) return;
         GameObject obj = new GameObject("Fento_Prefab");
 
         // Rizoma / Coroa central
@@ -1989,6 +2025,7 @@ public class FragaAssetGenerator : MonoBehaviour
     }
     private static void GenerateFarolCeltaPrefab(string dir)
     {
+        if (System.IO.File.Exists("Assets/Art/Models/Rocks/Farol_Celta.obj")) return;
         GameObject farolObj = new GameObject("FarolCelta_Prefab");
         
         // Base de Pedra
@@ -2049,7 +2086,19 @@ public class FragaAssetGenerator : MonoBehaviour
         Material rockMat = AssetDatabase.LoadAssetAtPath<Material>(matDir + "/Celtic_Stone.mat");
         Material mossMat = AssetDatabase.LoadAssetAtPath<Material>(matDir + "/Mat_DarkForest_Moss.mat");
         Material ironMat = AssetDatabase.LoadAssetAtPath<Material>(matDir + "/Mat_Ruins_Iron.mat");
-        Material woodMat = AssetDatabase.LoadAssetAtPath<Material>(matDir + "/Wood_Bark.mat");
+        Material woodMat = AssetDatabase.LoadAssetAtPath<Material>(matDir + "/Mat_Wood_Carved.mat") ?? AssetDatabase.LoadAssetAtPath<Material>(matDir + "/Wood_Bark.mat");
+        Material leatherMat = AssetDatabase.LoadAssetAtPath<Material>(matDir + "/Mat_Leather_Wrap.mat");
+        Material fabricMat = AssetDatabase.LoadAssetAtPath<Material>(matDir + "/Mat_Linen_Fabric.mat");
+        Material clothMat = AssetDatabase.LoadAssetAtPath<Material>(matDir + "/Mat_Player_DarkCloth.mat") ?? fabricMat;
+        Material soilMat = AssetDatabase.LoadAssetAtPath<Material>(matDir + "/Mat_Farmland_Soil.mat");
+        Material boneMat = AssetDatabase.LoadAssetAtPath<Material>(matDir + "/Mat_Bone_Horn.mat");
+        Material waterMat = AssetDatabase.LoadAssetAtPath<Material>(matDir + "/Water_Surface.mat");
+        Material vultoMat = AssetDatabase.LoadAssetAtPath<Material>(matDir + "/Mat_Vulto_Cloak.mat");
+        Material wolfMat = AssetDatabase.LoadAssetAtPath<Material>(matDir + "/Wolf_Fur.mat");
+        Material deerMat = AssetDatabase.LoadAssetAtPath<Material>(matDir + "/Deer_Pelt.mat") ?? wolfMat;
+        Material bearMat = AssetDatabase.LoadAssetAtPath<Material>(matDir + "/Bear_Fur.mat") ?? wolfMat;
+        Material boarMat = AssetDatabase.LoadAssetAtPath<Material>(matDir + "/Boar_Bristles.mat") ?? wolfMat;
+        Material rabbitMat = AssetDatabase.LoadAssetAtPath<Material>(matDir + "/Rabbit_Fur.mat") ?? wolfMat;
 
         string[] prefabFiles = System.IO.Directory.GetFiles(prefabsDir, "*.prefab");
         int repairedCount = 0;
@@ -2098,10 +2147,21 @@ public class FragaAssetGenerator : MonoBehaviour
                             if (oName.Contains("berry") || pName.Contains("berry")) fixedMats[s] = foliageMat ?? mossMat;
                             else if (oName.Contains("foliage") || oName.Contains("leaf") || oName.Contains("bush") || oName.Contains("fern") || oName.Contains("fento")) fixedMats[s] = foliageMat;
                             else if (oName.Contains("stone") || oName.Contains("rock") || oName.Contains("altar") || oName.Contains("cross") || oName.Contains("grave")) fixedMats[s] = rockMat;
+                            else if (oName.Contains("water") || pName.Contains("pond")) fixedMats[s] = waterMat ?? rockMat;
                             else if (oName.Contains("iron") || oName.Contains("metal") || oName.Contains("wire")) fixedMats[s] = ironMat;
+                            else if (oName.Contains("leather") || oName.Contains("grip")) fixedMats[s] = leatherMat ?? barkMat;
+                            else if (oName.Contains("fabric") || oName.Contains("bandage")) fixedMats[s] = fabricMat ?? barkMat;
+                            else if (oName.Contains("soil") || pName.Contains("farmland")) fixedMats[s] = soilMat ?? barkMat;
+                            else if (oName.Contains("bone") || oName.Contains("horn")) fixedMats[s] = boneMat ?? rockMat;
+                            else if (pName.Contains("wolf")) fixedMats[s] = wolfMat ?? barkMat;
+                            else if (pName.Contains("deer")) fixedMats[s] = deerMat ?? barkMat;
+                            else if (pName.Contains("bear")) fixedMats[s] = bearMat ?? barkMat;
+                            else if (pName.Contains("boar")) fixedMats[s] = boarMat ?? barkMat;
+                            else if (pName.Contains("rabbit")) fixedMats[s] = rabbitMat ?? barkMat;
+                            else if (pName.Contains("vulto") || pName.Contains("stalker") || pName.Contains("boss")) fixedMats[s] = vultoMat ?? barkMat;
                             else if (oName.Contains("wood") || oName.Contains("log") || oName.Contains("plank") || oName.Contains("workbench")) fixedMats[s] = woodMat ?? barkMat;
                             else if (oName.Contains("bark") || oName.Contains("trunk")) fixedMats[s] = barkMat;
-                            else if (pName.Contains("player")) fixedMats[s] = barkMat;
+                            else if (pName.Contains("player")) fixedMats[s] = clothMat ?? barkMat;
                             else fixedMats[s] = barkMat;
                         }
                     }

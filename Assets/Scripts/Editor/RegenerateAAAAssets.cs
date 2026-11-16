@@ -23,8 +23,8 @@ public static class RegenerateAAAAssets
         Material oakFolMat = Resources.Load<Material>("Materials/Mat_OakFoliage");
         Material pineNeedleMat = Resources.Load<Material>("Materials/Mat_PineNeedle");
         Material ironMat = Resources.Load<Material>("Materials/Mat_Ruins_Iron");
-        Material woodBarkMat = Resources.Load<Material>("Materials/Wood_Bark");
-        Material stoneMat = Resources.Load<Material>("Materials/Celtic_Stone");
+        Material carvedWoodMat = Resources.Load<Material>("Materials/Mat_Wood_Carved") ?? Resources.Load<Material>("Materials/Wood_Bark");
+        Material leatherMat = Resources.Load<Material>("Materials/Mat_Leather_Wrap") ?? carvedWoodMat;
 
         // 1. Regenerar Tree_Prefab (Carvalho Galego)
         GameObject oakObj = GalicianProceduralTreeGenerator.CreateTreePrefabObject(
@@ -48,7 +48,7 @@ public static class RegenerateAAAAssets
         Debug.Log("[Fraga AAA Overhaul] DeadTree_Prefab.prefab (Árvore Seca) regenerado com sucesso.");
 
         // 4. Regenerar Axe_Prefab (Machado Tradicional de Sobrevivência)
-        GameObject axeObj = ProceduralSurvivalAxeGenerator.BuildAxeGameObject(woodBarkMat, ironMat, stoneMat);
+        GameObject axeObj = ProceduralSurvivalAxeGenerator.BuildAxeGameObject(carvedWoodMat, ironMat, leatherMat);
         PrefabUtility.SaveAsPrefabAsset(axeObj, dir + "/Axe_Prefab.prefab");
         Object.DestroyImmediate(axeObj);
         Debug.Log("[Fraga AAA Overhaul] Axe_Prefab.prefab (Machado AAA) regenerado com sucesso.");

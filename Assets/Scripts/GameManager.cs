@@ -18,10 +18,10 @@ public class GameManager : MonoBehaviour
     public static extern void UpdateMapCell(System.IntPtr mapData, int width, int height, int x, int y, int newTileID);
 
     [Header("Map Configuration")]
-    public int mapWidth = 100;
-    public int mapHeight = 100;
+    public int mapWidth = 768;
+    public int mapHeight = 768;
     public int mapSeed = 1913;
-    public float pathfindingUpdateInterval = 0.2f; // Optimização Mobile: Pathfinding a cada 200ms em vez de todos os frames
+    public float pathfindingUpdateInterval = 0.30f; // Otimização Mobile/PC para mundo 768x768
 
     [Header("Player & Entities")]
     public Transform playerTransform;
@@ -56,6 +56,11 @@ public class GameManager : MonoBehaviour
 
     private void Awake()
     {
+        if (mapWidth < 512) mapWidth = FragaWorldBlueprint.DefaultWidth;
+        if (mapHeight < 512) mapHeight = FragaWorldBlueprint.DefaultHeight;
+        pathfindingUpdateInterval = Application.isMobilePlatform ? 0.35f : 0.25f;
+        FragaWorldBlueprint.Initialize(mapSeed, mapWidth, mapHeight);
+
         // 1. Inicializa a engine C++
         int engineVersion = InitFragaEngine();
         Debug.Log($"[FragaNative] Engine Inicializada. Versão/Check: {engineVersion}");
@@ -95,32 +100,40 @@ public class GameManager : MonoBehaviour
     public void ContinueGame()
     {
         SaveSystem saveSys = FindAnyObjectByType<SaveSystem>();
-        if (saveSys != null)
+        if (saveSys != null && saveSys.HasSaveFile())
         {
+            mapSeed = saveSys.PeekSavedSeed(mapSeed);
+            FragaWorldBlueprint.Initialize(mapSeed, mapWidth, mapHeight);
+            FragaWorldBlueprint.StampNativeMapGrid(mapDataPtr, mapWidth, mapHeight);
             saveSys.LoadGame();
-            // In the new SaveSystem, map is not saved, so we must regenerate it:
-            GenerateMapGrid(mapDataPtr, mapWidth, mapHeight, mapSeed);
         }
         else
         {
-            Debug.LogWarning("[GameManager] SaveSystem nao encontrado. Forcando New Game.");
+            Debug.LogWarning("[GameManager] SaveSystem ou ficheiro de save nao encontrado. Iniciando New Game.");
             StartNewGame(mapSeed);
             return;
         }
 
-        InitializeSubSystems();
+        InitializeSubSystems(preserveWorldState: true);
     }
 
     public void StartNewGame(int seed)
     {
         mapSeed = seed;
-        GenerateMapGrid(mapDataPtr, mapWidth, mapHeight, mapSeed);
-        Debug.Log($"[GameManager] Novo Mundo (C++) gerado com a Seed: {mapSeed}");
+        FragaWorldBlueprint.Initialize(mapSeed, mapWidth, mapHeight);
+        FragaWorldBlueprint.StampNativeMapGrid(mapDataPtr, mapWidth, mapHeight);
+        Debug.Log($"[GameManager] Novo Mundo Aberto {mapWidth}x{mapHeight} gerado com a Seed: {mapSeed}");
 
+        if (mapRenderer != null)
+        {
+            mapRenderer.ResetWorldState();
+        }
+
+        Vector2 camp = FragaWorldBlueprint.CrashCampPos;
         if (playerTransform != null)
         {
-            float spawnY = TerrainMeshGenerator.GetTerrainHeight(mapWidth / 2f, mapHeight / 2f) + 1.0f;
-            playerTransform.position = new Vector3(mapWidth / 2f, spawnY, mapHeight / 2f);
+            float spawnY = TerrainMeshGenerator.GetTerrainHeight(camp.x, camp.y) + 1.0f;
+            playerTransform.position = new Vector3(camp.x, spawnY, camp.y);
             var pc = playerTransform.GetComponent<PlayerController>();
             if (pc != null) pc.SnapToGround();
         }
@@ -128,15 +141,15 @@ public class GameManager : MonoBehaviour
         // Spawn de um companheiro proceduralmente perto das ruinas
         if (companionPrefab != null)
         {
-            float compX = mapWidth / 2f + 5f;
-            float compZ = mapHeight / 2f + 5f;
+            float compX = camp.x + 5f;
+            float compZ = camp.y + 5f;
             float compY = TerrainMeshGenerator.GetTerrainHeight(compX, compZ) + 1.0f;
             Vector3 companionPos = new Vector3(compX, compY, compZ);
             Instantiate(companionPrefab, companionPos, Quaternion.identity);
             Debug.Log("[GameManager] Companheiro spawnado nas ruínas.");
         }
 
-        InitializeSubSystems();
+        InitializeSubSystems(preserveWorldState: false);
     }
 
     public int[] GetMapData()
@@ -146,16 +159,16 @@ public class GameManager : MonoBehaviour
         return copy;
     }
 
-    public void LoadMapData(int[] savedGrid)
+    public void LoadMapData(int[] savedGrid, bool renderImmediately = false)
     {
         if (savedGrid.Length == mapWidth * mapHeight)
         {
             System.Array.Copy(savedGrid, mapDataArray, savedGrid.Length);
-            if (mapRenderer != null) mapRenderer.RenderInitialMap();
+            if (renderImmediately && mapRenderer != null) mapRenderer.RenderInitialMap();
         }
     }
 
-    private void InitializeSubSystems()
+    private void InitializeSubSystems(bool preserveWorldState = false)
     {
         // 5. Inicializa os Sub-Sistemas injetando os ponteiros nativos
         if (buildingSystem != null) buildingSystem.Initialize(mapDataPtr, mapWidth, mapHeight);
@@ -166,7 +179,33 @@ public class GameManager : MonoBehaviour
         if (mapRenderer != null) 
         {
             mapRenderer.Initialize(mapDataPtr, mapWidth, mapHeight);
-            mapRenderer.RenderInitialMap();
+            mapRenderer.RenderInitialMap(preserveWorldState);
+        }
+
+        if (FindAnyObjectByType<SurvivalMapSystem>() == null)
+        {
+            var mapSys = gameObject.AddComponent<SurvivalMapSystem>();
+            mapSys.playerTransform = playerTransform;
+        }
+
+        if (FindAnyObjectByType<SceneryLightingSystem>() == null)
+        {
+            var scLights = gameObject.AddComponent<SceneryLightingSystem>();
+            scLights.mapRenderer = mapRenderer;
+            scLights.dayNightCycle = FindAnyObjectByType<DayNightCycle>();
+        }
+        else
+        {
+            var scLights = FindAnyObjectByType<SceneryLightingSystem>();
+            if (scLights.mapRenderer == null) scLights.mapRenderer = mapRenderer;
+        }
+
+        if (FindAnyObjectByType<TutorialManager>() == null)
+        {
+            var tut = gameObject.AddComponent<TutorialManager>();
+            tut.playerTransform = playerTransform;
+            tut.inventory = InventoryAdvanced.Instance ?? FindAnyObjectByType<InventoryAdvanced>();
+            tut.uiManager = FindAnyObjectByType<UIManager>();
         }
 
         // FASE 2: Aplicação da Metaprocessão
@@ -204,6 +243,7 @@ public class GameManager : MonoBehaviour
     // Optimização Mobile: Coroutine para desfasar cálculo pesado da main thread / loop de renderização
     private IEnumerator UpdateFlowFieldRoutine()
     {
+        yield return null;
         while (true)
         {
             if (playerTransform != null && mapDataPtr != System.IntPtr.Zero && !isGameOver)

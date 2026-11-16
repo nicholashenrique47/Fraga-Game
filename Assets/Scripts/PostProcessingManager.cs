@@ -51,6 +51,13 @@ public class PostProcessingManager : MonoBehaviour
     private float baseGrainIntensity = 0f;
     private float baseLensDistortion = 0f;
     private float baseChromaticAberration = 0f;
+    private float nextRegionPollTime = 0f;
+    private Color targetRegionTint = Color.white;
+    private Color currentRegionTint = Color.white;
+    private float targetRegionContrastOffset = 0f;
+    private float targetRegionVignetteOffset = 0f;
+    private float currentRegionContrastOffset = 0f;
+    private float currentRegionVignetteOffset = 0f;
 
     private void Start()
     {
@@ -114,7 +121,9 @@ public class PostProcessingManager : MonoBehaviour
             colorAdjustments.saturation.overrideState = true;
             colorAdjustments.contrast.overrideState = true;
             colorAdjustments.postExposure.overrideState = true;
+            colorAdjustments.colorFilter.overrideState = true;
             colorAdjustments.postExposure.value = 0.50f; // Clareamento suave e limpo The Forest
+            colorAdjustments.colorFilter.value = Color.white;
         }
         if (filmGrain != null)
         {
@@ -232,13 +241,56 @@ public class PostProcessingManager : MonoBehaviour
     /// Camadas de intensidade: Normal (100-60), Tensao (60-30), Panico (30-0).
     private void UpdateAmbientPostProcessing(float sanity)
     {
+        if (Time.time >= nextRegionPollTime)
+        {
+            nextRegionPollTime = Time.time + 0.35f;
+            Transform pt = playerStatus != null ? playerStatus.transform : (PlayerController.Instance != null ? PlayerController.Instance.transform : null);
+            if (pt != null)
+            {
+                var reg = FragaWorldBlueprint.GetRegion(pt.position.x, pt.position.z);
+                switch (reg)
+                {
+                    case FragaWorldBlueprint.WorldRegion.SacredCave:
+                        targetRegionTint = new Color(0.86f, 0.90f, 1.0f);
+                        targetRegionContrastOffset = 6f;
+                        targetRegionVignetteOffset = 0.08f;
+                        break;
+                    case FragaWorldBlueprint.WorldRegion.SwampBasin:
+                        targetRegionTint = new Color(0.90f, 0.98f, 0.92f);
+                        targetRegionContrastOffset = 4f;
+                        targetRegionVignetteOffset = 0.05f;
+                        break;
+                    case FragaWorldBlueprint.WorldRegion.MountainSummit:
+                    case FragaWorldBlueprint.WorldRegion.FarolBluff:
+                        targetRegionTint = new Color(0.96f, 0.98f, 1.0f);
+                        targetRegionContrastOffset = 5f;
+                        targetRegionVignetteOffset = 0f;
+                        break;
+                    case FragaWorldBlueprint.WorldRegion.AtlanticCoast:
+                        targetRegionTint = new Color(0.97f, 0.99f, 1.0f);
+                        targetRegionContrastOffset = 2f;
+                        targetRegionVignetteOffset = 0f;
+                        break;
+                    default:
+                        targetRegionTint = Color.white;
+                        targetRegionContrastOffset = 0f;
+                        targetRegionVignetteOffset = 0f;
+                        break;
+                }
+            }
+        }
+
+        currentRegionTint = Color.Lerp(currentRegionTint, targetRegionTint, Time.deltaTime * 1.8f);
+        currentRegionContrastOffset = Mathf.Lerp(currentRegionContrastOffset, targetRegionContrastOffset, Time.deltaTime * 1.8f);
+        currentRegionVignetteOffset = Mathf.Lerp(currentRegionVignetteOffset, targetRegionVignetteOffset, Time.deltaTime * 1.8f);
+
         // t normalizado: 0 = sanidade cheia, 1 = sanidade zero
         float t = 1f - (sanity / 100f);
 
         // Camada 1: Vignette (suave -> agressivo vermelho escuro)
         if (vignette != null)
         {
-            vignette.intensity.value = Mathf.Lerp(baseVignetteIntensity, 0.45f, t);
+            vignette.intensity.value = Mathf.Clamp01(Mathf.Lerp(baseVignetteIntensity, 0.45f, t) + currentRegionVignetteOffset);
             vignette.smoothness.value = Mathf.Lerp(0.2f, 0.65f, t);
 
             // Transicao de cor: preto -> vermelho escuro -> vermelho saturado
@@ -263,7 +315,8 @@ public class PostProcessingManager : MonoBehaviour
         if (colorAdjustments != null)
         {
             colorAdjustments.saturation.value = Mathf.Lerp(baseSaturation, -50f, t);
-            colorAdjustments.contrast.value = Mathf.Lerp(baseContrast, 20f, t);
+            colorAdjustments.contrast.value = Mathf.Lerp(baseContrast, 20f, t) + currentRegionContrastOffset;
+            colorAdjustments.colorFilter.value = currentRegionTint;
 
             // Exposicao: sempre nítido (+0.50 EV) durante jogo normal, escurece apenas em pânico real extremo
             if (sanity < 20f)

@@ -1,8 +1,8 @@
 using UnityEngine;
 
 /// ProceduralGrassSystem: Relva volumétrica 3D estilo The Forest via GPU Instancing.
-/// Gera tufos estrela multi-face com curvatura natural e sway sincronizado ao vento.
-/// Culling esférico otimizado para performance mobile estável a 60 FPS.
+/// Gera tufos estrela multi-face com curvatura natural, AO de raiz, textura de capim real
+/// (Mat_Grass_Tuft), streaming contínuo em mapas grandes (220x220+) e calibração PC vs Mobile 60 FPS.
 public class ProceduralGrassSystem : MonoBehaviour
 {
     [Header("Dependencies")]
@@ -11,43 +11,66 @@ public class ProceduralGrassSystem : MonoBehaviour
 
     [Header("Grass Config")]
     public bool enableGrass = true;
-    public int grassDensity = 4800;  // Cobertura completa do mapa de 100x100m
-    public float cullDistance = 45f; // Distância de culling para 60 FPS mobile
-    public float grassHeight = 0.54f;
-    public float grassWidth = 0.46f;
+    public int grassDensity = 4800;  // Escalado automaticamente para PC vs Mobile no Awake
+    public float cullDistance = 45f;
+    public float grassHeight = 0.58f;
+    public float grassWidth = 0.52f;
 
     [Header("Visual Colors")]
-    public Color grassColorDark = new Color(0.20f, 0.42f, 0.15f);
-    public Color grassColorLight = new Color(0.32f, 0.62f, 0.22f);
+    public Color grassColorDark = new Color(0.86f, 0.94f, 0.80f);
+    public Color grassColorLight = new Color(0.95f, 1.0f, 0.88f);
 
     // Runtime
     private Mesh grassMesh;
     private Material grassMaterial;
     private Vector3[] grassPositions;
     private Matrix4x4[] grassMatrices;
-    
-    // Suporte a até 5 lotes de 1023 instâncias (5115 instâncias máx sem GC alloc)
+    private int mapWidth = FragaWorldBlueprint.DefaultWidth;
+    private int mapHeight = FragaWorldBlueprint.DefaultHeight;
+    private Vector3 lastPlayerPos;
+    private bool hasLastPlayerPos = false;
+
+    // Até 10 lotes de 1023 instâncias (10.230 instâncias máx no PC; 5 lotes no Mobile)
     private Matrix4x4[][] batchMatrices;
     private int[] batchCounts;
-    private const int MAX_BATCHES = 5;
+    private int activeMaxBatches = 5;
+    private const int MAX_BATCHES_PC = 10;
+    private const int MAX_BATCHES_MOBILE = 5;
     private const int BATCH_SIZE = 1023;
+    private static readonly int FragaPlayerPosID = Shader.PropertyToID("_FragaPlayerPos");
 
     private void Awake()
     {
+        bool isMobile = Application.isMobilePlatform;
+        activeMaxBatches = isMobile ? MAX_BATCHES_MOBILE : MAX_BATCHES_PC;
+
+        if (!isMobile)
+        {
+            if (grassDensity <= 4800) grassDensity = 9600;
+            if (cullDistance < 60f) cullDistance = 66f;
+        }
+        else
+        {
+            grassDensity = Mathf.Min(grassDensity, 4800);
+            cullDistance = Mathf.Min(cullDistance, 45f);
+        }
+
+        RefreshMapBounds();
         CreateGrassMesh();
         CreateGrassMaterial();
         GenerateGrassPositions();
 
-        batchMatrices = new Matrix4x4[MAX_BATCHES][];
-        for (int b = 0; b < MAX_BATCHES; b++)
+        batchMatrices = new Matrix4x4[activeMaxBatches][];
+        for (int b = 0; b < activeMaxBatches; b++)
         {
             batchMatrices[b] = new Matrix4x4[BATCH_SIZE];
         }
-        batchCounts = new int[MAX_BATCHES];
+        batchCounts = new int[activeMaxBatches];
     }
 
     private void Start()
     {
+        RefreshMapBounds();
         if (playerTransform == null)
         {
             GameObject player = GameObject.FindGameObjectWithTag("Player");
@@ -58,10 +81,25 @@ public class ProceduralGrassSystem : MonoBehaviour
                 if (pc != null) playerTransform = pc.transform;
             }
         }
+        if (playerTransform != null)
+        {
+            lastPlayerPos = playerTransform.position;
+            hasLastPlayerPos = true;
+        }
     }
 
-    /// Cria uma malha 3D volumétrica de Tufo Estrela (Star-Clump)
-    /// Composta por 3 quads entrecruzados a 0°, 60° e 120° com curvatura para fora
+    private void RefreshMapBounds()
+    {
+        GameManager gm = FindAnyObjectByType<GameManager>();
+        if (gm != null)
+        {
+            mapWidth = Mathf.Max(32, gm.mapWidth);
+            mapHeight = Mathf.Max(32, gm.mapHeight);
+        }
+    }
+
+    /// Cria uma malha 3D volumétrica de Tufo Estrela (3 quads entrecruzados a 0°, 60°, 120°)
+    /// com curvatura natural e Vertex Color: R = Wind, G = Phase, B = Root-to-Tip AO
     private void CreateGrassMesh()
     {
         grassMesh = new Mesh();
@@ -72,13 +110,13 @@ public class ProceduralGrassSystem : MonoBehaviour
 
         int numQuads = 3;
         int vertsPerQuad = 6;
-        int trisPerQuad = 4; // 2 segmentos de quad
+        int trisPerQuad = 4;
 
         Vector3[] vertices = new Vector3[numQuads * vertsPerQuad];
         Vector2[] uvs = new Vector2[numQuads * vertsPerQuad];
         Color[] colors = new Color[numQuads * vertsPerQuad];
         Vector3[] normals = new Vector3[numQuads * vertsPerQuad];
-        int[] triangles = new int[numQuads * trisPerQuad * 3 * 2]; // *2 para double-sided
+        int[] triangles = new int[numQuads * trisPerQuad * 3 * 2];
 
         int vIndex = 0;
         int tIndex = 0;
@@ -88,82 +126,54 @@ public class ProceduralGrassSystem : MonoBehaviour
             float angle = q * (180f / numQuads) * Mathf.Deg2Rad;
             Vector3 dir = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
             Vector3 norm = new Vector3(-Mathf.Sin(angle), 0f, Mathf.Cos(angle));
+            float phase = (q + 0.5f) / numQuads;
 
             int baseV = vIndex;
 
-            // Segmento inferior (Base -> Meio)
-            // 0: Base Esquerda
-            vertices[vIndex + 0] = -dir * (w * 0.5f);
+            // Base (raiz com AO forte e zero vento)
+            vertices[vIndex + 0] = -dir * (w * 0.5f) + Vector3.down * 0.03f;
             uvs[vIndex + 0] = new Vector2(0f, 0f);
-            colors[vIndex + 0] = new Color(0f, 0f, 0f, 1f); // Sem vento na raiz
+            colors[vIndex + 0] = new Color(0f, phase, 0.36f, 1f);
             normals[vIndex + 0] = Vector3.up;
 
-            // 1: Base Direita
-            vertices[vIndex + 1] = dir * (w * 0.5f);
+            vertices[vIndex + 1] = dir * (w * 0.5f) + Vector3.down * 0.03f;
             uvs[vIndex + 1] = new Vector2(1f, 0f);
-            colors[vIndex + 1] = new Color(0f, 0f, 0f, 1f);
+            colors[vIndex + 1] = new Color(0f, phase, 0.36f, 1f);
             normals[vIndex + 1] = Vector3.up;
 
-            // Segmento Médio (Leve expansão e curvatura convexa)
-            // 2: Meio Esquerdo
-            vertices[vIndex + 2] = -dir * (w * 0.58f) + norm * 0.04f + Vector3.up * (h * 0.52f);
+            // Meio arqueado
+            vertices[vIndex + 2] = -dir * (w * 0.58f) + norm * 0.05f + Vector3.up * (h * 0.52f);
             uvs[vIndex + 2] = new Vector2(0f, 0.5f);
-            colors[vIndex + 2] = new Color(0.45f, 0.35f, 0f, 1f);
-            normals[vIndex + 2] = (Vector3.up * 0.8f + norm * 0.2f).normalized;
+            colors[vIndex + 2] = new Color(0.45f, phase, 0.78f, 1f);
+            normals[vIndex + 2] = (Vector3.up * 0.85f + norm * 0.25f).normalized;
 
-            // 3: Meio Direito
-            vertices[vIndex + 3] = dir * (w * 0.58f) - norm * 0.04f + Vector3.up * (h * 0.52f);
+            vertices[vIndex + 3] = dir * (w * 0.58f) - norm * 0.05f + Vector3.up * (h * 0.52f);
             uvs[vIndex + 3] = new Vector2(1f, 0.5f);
-            colors[vIndex + 3] = new Color(0.45f, 0.35f, 0f, 1f);
-            normals[vIndex + 3] = (Vector3.up * 0.8f - norm * 0.2f).normalized;
+            colors[vIndex + 3] = new Color(0.45f, phase, 0.78f, 1f);
+            normals[vIndex + 3] = (Vector3.up * 0.85f - norm * 0.25f).normalized;
 
-            // Segmento Superior (Ponta arqueada pelo vento)
-            // 4: Ponta Esquerda
-            vertices[vIndex + 4] = -dir * (w * 0.32f) + norm * 0.09f + Vector3.up * h;
-            uvs[vIndex + 4] = new Vector2(0.2f, 1f);
-            colors[vIndex + 4] = new Color(1.0f, 1.0f, 0f, 1f); // Vento máximo no ápice
+            // Ápice com vento máximo e iluminação cheia
+            vertices[vIndex + 4] = -dir * (w * 0.42f) + norm * 0.11f + Vector3.up * h;
+            uvs[vIndex + 4] = new Vector2(0.08f, 1f);
+            colors[vIndex + 4] = new Color(1.0f, phase, 1.0f, 1f);
             normals[vIndex + 4] = Vector3.up;
 
-            // 5: Ponta Direita
-            vertices[vIndex + 5] = dir * (w * 0.32f) - norm * 0.09f + Vector3.up * h;
-            uvs[vIndex + 5] = new Vector2(0.8f, 1f);
-            colors[vIndex + 5] = new Color(1.0f, 1.0f, 0f, 1f);
+            vertices[vIndex + 5] = dir * (w * 0.42f) - norm * 0.11f + Vector3.up * h;
+            uvs[vIndex + 5] = new Vector2(0.92f, 1f);
+            colors[vIndex + 5] = new Color(1.0f, phase, 1.0f, 1f);
             normals[vIndex + 5] = Vector3.up;
 
-            // Triângulos face frontal:
-            triangles[tIndex++] = baseV + 0;
-            triangles[tIndex++] = baseV + 2;
-            triangles[tIndex++] = baseV + 1;
+            // Face frontal
+            triangles[tIndex++] = baseV + 0; triangles[tIndex++] = baseV + 2; triangles[tIndex++] = baseV + 1;
+            triangles[tIndex++] = baseV + 1; triangles[tIndex++] = baseV + 2; triangles[tIndex++] = baseV + 3;
+            triangles[tIndex++] = baseV + 2; triangles[tIndex++] = baseV + 4; triangles[tIndex++] = baseV + 3;
+            triangles[tIndex++] = baseV + 3; triangles[tIndex++] = baseV + 4; triangles[tIndex++] = baseV + 5;
 
-            triangles[tIndex++] = baseV + 1;
-            triangles[tIndex++] = baseV + 2;
-            triangles[tIndex++] = baseV + 3;
-
-            // Quad superior: (2, 4, 3) e (3, 4, 5)
-            triangles[tIndex++] = baseV + 2;
-            triangles[tIndex++] = baseV + 4;
-            triangles[tIndex++] = baseV + 3;
-
-            triangles[tIndex++] = baseV + 3;
-            triangles[tIndex++] = baseV + 4;
-            triangles[tIndex++] = baseV + 5;
-
-            // Triângulos face traseira (Double-sided para visibilidade total):
-            triangles[tIndex++] = baseV + 1;
-            triangles[tIndex++] = baseV + 2;
-            triangles[tIndex++] = baseV + 0;
-
-            triangles[tIndex++] = baseV + 3;
-            triangles[tIndex++] = baseV + 2;
-            triangles[tIndex++] = baseV + 1;
-
-            triangles[tIndex++] = baseV + 3;
-            triangles[tIndex++] = baseV + 4;
-            triangles[tIndex++] = baseV + 2;
-
-            triangles[tIndex++] = baseV + 5;
-            triangles[tIndex++] = baseV + 4;
-            triangles[tIndex++] = baseV + 3;
+            // Face traseira (double-sided)
+            triangles[tIndex++] = baseV + 1; triangles[tIndex++] = baseV + 2; triangles[tIndex++] = baseV + 0;
+            triangles[tIndex++] = baseV + 3; triangles[tIndex++] = baseV + 2; triangles[tIndex++] = baseV + 1;
+            triangles[tIndex++] = baseV + 3; triangles[tIndex++] = baseV + 4; triangles[tIndex++] = baseV + 2;
+            triangles[tIndex++] = baseV + 5; triangles[tIndex++] = baseV + 4; triangles[tIndex++] = baseV + 3;
 
             vIndex += vertsPerQuad;
         }
@@ -174,51 +184,84 @@ public class ProceduralGrassSystem : MonoBehaviour
         grassMesh.normals = normals;
         grassMesh.triangles = triangles;
         grassMesh.RecalculateBounds();
-        grassMesh.RecalculateNormals();
         grassMesh.RecalculateTangents();
     }
 
     private void CreateGrassMaterial()
     {
-        // Prioriza shader fotorealista The Forest com Subsurface Scattering
-        Shader foliageShader = Shader.Find("Fraga/Foliage_TheForest_SSS");
-        if (foliageShader == null) foliageShader = Shader.Find("Fraga/FoliageSway_Instanced");
-        
-        if (foliageShader != null)
+        Material grassRef = Resources.Load<Material>("Materials/Mat_Grass_Tuft");
+        if (grassRef != null)
         {
-            grassMaterial = new Material(foliageShader);
-            Material foliageRef = Resources.Load<Material>("Materials/Mat_OakFoliage");
-            if (foliageRef != null && foliageRef.HasProperty("_BaseMap") && foliageRef.GetTexture("_BaseMap") != null)
-            {
-                grassMaterial.SetTexture("_BaseMap", foliageRef.GetTexture("_BaseMap"));
-            }
-            grassMaterial.SetColor("_BaseColor", grassColorDark);
-            grassMaterial.SetFloat("_Cutoff", 0.28f);
+            grassMaterial = new Material(grassRef);
         }
         else
         {
-            Material foliageRef = Resources.Load<Material>("Materials/Mat_OakFoliage");
-            if (foliageRef != null)
+            Shader foliageShader = Shader.Find("Fraga/Foliage_TheForest_SSS");
+            if (foliageShader == null) foliageShader = Shader.Find("Fraga/FoliageSway_Instanced");
+
+            if (foliageShader != null)
             {
-                grassMaterial = new Material(foliageRef);
+                grassMaterial = new Material(foliageShader);
+                Material foliageRef = Resources.Load<Material>("Materials/Mat_Fern_Frond")
+                    ?? Resources.Load<Material>("Materials/Mat_OakFoliage");
+                if (foliageRef != null && foliageRef.HasProperty("_BaseMap") && foliageRef.GetTexture("_BaseMap") != null)
+                {
+                    grassMaterial.SetTexture("_BaseMap", foliageRef.GetTexture("_BaseMap"));
+                }
+                if (foliageRef != null && foliageRef.HasProperty("_BumpMap") && foliageRef.GetTexture("_BumpMap") != null)
+                {
+                    grassMaterial.SetTexture("_BumpMap", foliageRef.GetTexture("_BumpMap"));
+                }
+                grassMaterial.SetColor("_BaseColor", grassColorDark);
+                grassMaterial.SetFloat("_Cutoff", 0.28f);
             }
             else
             {
-                Shader shader = Shader.Find("Universal Render Pipeline/Lit");
-                if (shader == null) shader = Shader.Find("Standard");
+                Shader shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
                 grassMaterial = new Material(shader);
+                grassMaterial.SetColor("_BaseColor", grassColorDark);
+                grassMaterial.SetFloat("_AlphaClip", 1f);
+                grassMaterial.SetFloat("_Cutoff", 0.30f);
+                grassMaterial.EnableKeyword("_ALPHATEST_ON");
+                grassMaterial.SetOverrideTag("RenderType", "TransparentCutout");
+                grassMaterial.renderQueue = (int)UnityEngine.Rendering.RenderQueue.AlphaTest;
             }
-            grassMaterial.SetColor("_BaseColor", grassColorDark);
-            grassMaterial.SetFloat("_AlphaClip", 1f);
-            grassMaterial.SetFloat("_Cutoff", 0.30f);
-            grassMaterial.EnableKeyword("_ALPHATEST_ON");
-            grassMaterial.SetOverrideTag("RenderType", "TransparentCutout");
-            grassMaterial.renderQueue = (int)UnityEngine.Rendering.RenderQueue.AlphaTest;
         }
 
         grassMaterial.enableInstancing = true;
-        if (grassMaterial.HasProperty("_Cull")) grassMaterial.SetFloat("_Cull", 0f); // Double sided
-        if (grassMaterial.HasProperty("_Smoothness")) grassMaterial.SetFloat("_Smoothness", 0.15f);
+        if (grassMaterial.HasProperty("_Cull")) grassMaterial.SetFloat("_Cull", 0f);
+        if (grassMaterial.HasProperty("_Smoothness")) grassMaterial.SetFloat("_Smoothness", 0.22f);
+    }
+
+    private void PlaceTuftAround(int idx, float centerX, float centerZ, float minRadius, float maxRadius)
+    {
+        float ang = Random.Range(0f, Mathf.PI * 2f);
+        float rad = Mathf.Lerp(minRadius, maxRadius, Mathf.Sqrt(Random.value));
+        float x = Mathf.Clamp(centerX + Mathf.Cos(ang) * rad, 3f, Mathf.Max(4f, mapWidth - 3f));
+        float z = Mathf.Clamp(centerZ + Mathf.Sin(ang) * rad, 3f, Mathf.Max(4f, mapHeight - 3f));
+        float y = TerrainMeshGenerator.GetTerrainHeight(x, z);
+
+        // Evita relva submersa no oceano, lago, rio ou no pico nevado
+        float waterDepth = FragaWorldBlueprint.GetWaterDepth(x, z);
+        float coast = FragaWorldBlueprint.GetIslandCoastMetric(x, z);
+        if (waterDepth > 0.05f || coast >= 0.94f || y > 24.5f)
+        {
+            grassPositions[idx] = new Vector3(x, -999f, z);
+            grassMatrices[idx] = Matrix4x4.zero;
+            return;
+        }
+
+        grassPositions[idx] = new Vector3(x, y, z);
+
+        float scaleXZ = Random.Range(0.85f, 1.50f);
+        float scaleY = Random.Range(0.78f, 1.38f);
+        float rot = Random.Range(0f, 360f);
+
+        grassMatrices[idx] = Matrix4x4.TRS(
+            grassPositions[idx],
+            Quaternion.Euler(Random.Range(-4f, 4f), rot, Random.Range(-4f, 4f)),
+            new Vector3(scaleXZ, scaleY, scaleXZ)
+        );
     }
 
     private void GenerateGrassPositions()
@@ -226,25 +269,12 @@ public class ProceduralGrassSystem : MonoBehaviour
         grassPositions = new Vector3[grassDensity];
         grassMatrices = new Matrix4x4[grassDensity];
 
+        float centerX = mapWidth * 0.5f;
+        float centerZ = mapHeight * 0.5f;
+
         for (int i = 0; i < grassDensity; i++)
         {
-            // Espalha a relva por todo o terreno de 100x100m com margem segura
-            float x = Random.Range(3f, 97f);
-            float z = Random.Range(3f, 97f);
-            float y = TerrainMeshGenerator.GetTerrainHeight(x, z);
-
-            grassPositions[i] = new Vector3(x, y, z);
-
-            // Variação orgânica de escala e rotação azimutal
-            float scaleXZ = Random.Range(0.85f, 1.45f);
-            float scaleY = Random.Range(0.80f, 1.35f);
-            float rot = Random.Range(0f, 360f);
-
-            grassMatrices[i] = Matrix4x4.TRS(
-                grassPositions[i],
-                Quaternion.Euler(Random.Range(-3f, 3f), rot, Random.Range(-3f, 3f)),
-                new Vector3(scaleXZ, scaleY, scaleXZ)
-            );
+            PlaceTuftAround(i, centerX, centerZ, 0f, cullDistance);
         }
     }
 
@@ -259,7 +289,8 @@ public class ProceduralGrassSystem : MonoBehaviour
             else return;
         }
 
-        // Sincroniza parâmetros de vento se disponíveis no shader
+        Shader.SetGlobalVector(FragaPlayerPosID, playerTransform.position);
+
         if (weatherSystem != null && grassMaterial != null)
         {
             if (grassMaterial.HasProperty("_WindSpeed"))
@@ -282,7 +313,13 @@ public class ProceduralGrassSystem : MonoBehaviour
         Vector3 playerPos = playerTransform.position;
         float cullDistSq = cullDistance * cullDistance;
 
-        for (int b = 0; b < MAX_BATCHES; b++)
+        bool isTeleport = !hasLastPlayerPos || (playerPos - lastPlayerPos).sqrMagnitude > cullDistSq * 2.25f;
+        int recycleQuota = isTeleport ? grassDensity : 360;
+        float minRecycleRadius = isTeleport ? 0f : cullDistance * 0.55f;
+        lastPlayerPos = playerPos;
+        hasLastPlayerPos = true;
+
+        for (int b = 0; b < activeMaxBatches; b++)
         {
             batchCounts[b] = 0;
         }
@@ -291,49 +328,54 @@ public class ProceduralGrassSystem : MonoBehaviour
 
         for (int i = 0; i < grassDensity; i++)
         {
-            float distSq = (grassPositions[i] - playerPos).sqrMagnitude;
-            if (distSq < cullDistSq)
+            float dx = grassPositions[i].x - playerPos.x;
+            float dz = grassPositions[i].z - playerPos.z;
+            float distSq = dx * dx + dz * dz;
+
+            if (distSq >= cullDistSq && recycleQuota > 0)
+            {
+                PlaceTuftAround(i, playerPos.x, playerPos.z, minRecycleRadius, cullDistance * 0.98f);
+                recycleQuota--;
+                dx = grassPositions[i].x - playerPos.x;
+                dz = grassPositions[i].z - playerPos.z;
+                distSq = dx * dx + dz * dz;
+            }
+
+            if (distSq < cullDistSq && grassPositions[i].y > -50f)
             {
                 if (batchCounts[currentBatch] >= BATCH_SIZE)
                 {
                     currentBatch++;
-                    if (currentBatch >= MAX_BATCHES) break;
+                    if (currentBatch >= activeMaxBatches) break;
                 }
 
                 batchMatrices[currentBatch][batchCounts[currentBatch]++] = grassMatrices[i];
             }
         }
 
-        for (int b = 0; b <= currentBatch && b < MAX_BATCHES; b++)
+        for (int b = 0; b <= currentBatch && b < activeMaxBatches; b++)
         {
             if (batchCounts[b] > 0)
             {
                 Graphics.DrawMeshInstanced(grassMesh, 0, grassMaterial, batchMatrices[b], batchCounts[b],
-                    null, UnityEngine.Rendering.ShadowCastingMode.Off, false);
+                    null, UnityEngine.Rendering.ShadowCastingMode.Off, true);
             }
         }
     }
 
-    /// Atualiza posições de relva quando um objeto for colocado ou árvore derrubada
     public void RefreshGrassAt(float worldX, float worldZ, float radius)
     {
         float radiusSq = radius * radius;
+        float cx = playerTransform != null ? playerTransform.position.x : mapWidth * 0.5f;
+        float cz = playerTransform != null ? playerTransform.position.z : mapHeight * 0.5f;
+
         for (int i = 0; i < grassDensity; i++)
         {
             float dx = grassPositions[i].x - worldX;
             float dz = grassPositions[i].z - worldZ;
             if (dx * dx + dz * dz < radiusSq)
             {
-                float newX = Random.Range(4f, 96f);
-                float newZ = Random.Range(4f, 96f);
-                float newY = TerrainMeshGenerator.GetTerrainHeight(newX, newZ);
-                grassPositions[i] = new Vector3(newX, newY, newZ);
-
-                grassMatrices[i] = Matrix4x4.TRS(
-                    grassPositions[i],
-                    Quaternion.Euler(0, Random.Range(0f, 360f), 0),
-                    Vector3.one * Random.Range(0.85f, 1.4f)
-                );
+                PlaceTuftAround(i, cx, cz, Mathf.Max(radius + 2f, cullDistance * 0.4f), cullDistance * 0.98f);
             }
         }
     }

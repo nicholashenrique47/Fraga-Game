@@ -47,7 +47,7 @@ public class IsometricCamera : MonoBehaviour
     {
         if (target == null)
         {
-            var pc = FindFirstObjectByType<PlayerController>();
+            var pc = FindAnyObjectByType<PlayerController>();
             if (pc != null)
             {
                 target = pc.transform;

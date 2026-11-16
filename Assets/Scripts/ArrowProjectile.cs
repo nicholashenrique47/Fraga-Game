@@ -1,16 +1,19 @@
 ﻿using UnityEngine;
 
 /// <summary>
-/// ArrowProjectile: Balística realista de flecha com gravidade e penetração física em alvos.
+/// ArrowProjectile: Balistica realista de flecha com gravidade, varredura de acerto em Vultos/Fauna,
+/// VFX por material e recuperacao correta (ID 110 ou 117).
 /// </summary>
 public class ArrowProjectile : MonoBehaviour
 {
     [Header("Ballistics")]
     public float damage = 45f;
     public float gravityMultiplier = 1.15f;
+    public int pickupItemId = 110;
     public bool isFired = false;
     public Vector3 velocity;
 
+    private Transform shooterRoot;
     private bool hasImpacted = false;
     private Rigidbody rb;
     private Collider col;
@@ -22,11 +25,21 @@ public class ArrowProjectile : MonoBehaviour
         col = GetComponent<Collider>();
     }
 
-    public void Launch(Vector3 initialVelocity, float arrowDamage)
+    public void Launch(Vector3 initialVelocity, float arrowDamage, int recoveredItemId = 110, Transform shooter = null)
     {
         velocity = initialVelocity;
         damage = arrowDamage;
+        pickupItemId = recoveredItemId;
+        shooterRoot = shooter;
         isFired = true;
+
+        if (col != null && shooterRoot != null)
+        {
+            foreach (Collider c in shooterRoot.GetComponentsInChildren<Collider>(true))
+            {
+                Physics.IgnoreCollision(col, c, true);
+            }
+        }
 
         if (rb != null)
         {
@@ -46,23 +59,86 @@ public class ArrowProjectile : MonoBehaviour
             return;
         }
 
-        // Aplica gravidade adicional e alinha a ponta com a trajetória
         if (rb != null && rb.linearVelocity.sqrMagnitude > 1f)
         {
+            Vector3 vel = rb.linearVelocity;
+            float stepDist = vel.magnitude * Time.fixedDeltaTime * 1.4f;
+            Ray sweepRay = new Ray(transform.position, vel.normalized);
+
+            if (VultoManager.Instance != null &&
+                VultoManager.Instance.TryDamageVultoInRay(sweepRay, stepDist, 0.42f, damage, sweepRay.direction, out Vector3 vultoHit, out bool vultoKilled))
+            {
+                CompleteLivingHit(vultoHit, -sweepRay.direction, vultoKilled, isShadow: true);
+                return;
+            }
+
+            if (FaunaManager.Instance != null &&
+                FaunaManager.Instance.TryDamageFaunaInRay(sweepRay, stepDist, 0.36f, damage, out Vector3 faunaHit, out bool faunaKilled))
+            {
+                CompleteLivingHit(faunaHit, -sweepRay.direction, faunaKilled, isShadow: false);
+                return;
+            }
+
             rb.AddForce(Physics.gravity * (gravityMultiplier - 1f), ForceMode.Acceleration);
             transform.rotation = Quaternion.LookRotation(rb.linearVelocity);
         }
     }
 
+    private void CompleteLivingHit(Vector3 hitPos, Vector3 normal, bool killed, bool isShadow)
+    {
+        hasImpacted = true;
+        isFired = false;
+
+        if (rb != null)
+        {
+            rb.linearVelocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+            rb.isKinematic = true;
+        }
+        if (col != null) col.enabled = false;
+
+        transform.position = hitPos;
+        PlayImpactAudio();
+
+        if (VFXPoolManager.Instance != null)
+        {
+            if (isShadow) VFXPoolManager.Instance.PlayShadowHitVFX(hitPos);
+            else VFXPoolManager.Instance.PlayBloodSplashVFX(hitPos, normal);
+        }
+
+        if (HUDSurvivalOverlay.Instance != null)
+        {
+            HUDSurvivalOverlay.Instance.TriggerHitMarker(isCrit: damage >= 50f, isKill: killed);
+            if (killed)
+            {
+                HUDSurvivalOverlay.Instance.ShowLootTooltip(isShadow
+                    ? "<color=#BB88FF>Vulto abatido com flecha!</color>"
+                    : "<color=#55FF88>Presa abatida com flecha!</color>");
+            }
+        }
+
+        CreateArrowPickupArea(hitPos);
+        Destroy(gameObject, 45f);
+    }
+
     private void OnCollisionEnter(Collision collision)
     {
         if (hasImpacted) return;
-        HandleImpact(collision.collider, collision.contacts[0].point, collision.contacts[0].normal);
+        if (collision.collider == null) return;
+        if (shooterRoot != null && (collision.collider.transform == shooterRoot || collision.collider.transform.IsChildOf(shooterRoot)))
+            return;
+
+        Vector3 point = collision.contacts.Length > 0 ? collision.contacts[0].point : transform.position;
+        Vector3 normal = collision.contacts.Length > 0 ? collision.contacts[0].normal : -transform.forward;
+        HandleImpact(collision.collider, point, normal);
     }
 
     private void OnTriggerEnter(Collider other)
     {
-        if (hasImpacted || other.isTrigger) return;
+        if (hasImpacted || other == null || other.isTrigger) return;
+        if (shooterRoot != null && (other.transform == shooterRoot || other.transform.IsChildOf(shooterRoot)))
+            return;
+
         HandleImpact(other, transform.position, -transform.forward);
     }
 
@@ -72,13 +148,21 @@ public class ArrowProjectile : MonoBehaviour
         hasImpacted = true;
         isFired = false;
 
-        // 1. Aplica dano à entidade atingida
+        bool hitShadow = VultoManager.Instance != null && VultoManager.Instance.TryDamageVultoAt(point, damage);
+        bool faunaKilled = false;
+        bool hitFauna = !hitShadow && FaunaManager.Instance != null && FaunaManager.Instance.TryDamageFaunaAt(point, damage, out faunaKilled);
+
         if (targetCol != null)
         {
             targetCol.SendMessageUpwards("TakeDamage", (int)damage, SendMessageOptions.DontRequireReceiver);
         }
 
-        // 2. Trava a flecha no alvo (fixa na madeira, carne ou terreno)
+        if (hitShadow || hitFauna || (targetCol != null && targetCol.GetComponentInParent<WildlifeAIEngine>() != null))
+        {
+            if (HUDSurvivalOverlay.Instance != null)
+                HUDSurvivalOverlay.Instance.TriggerHitMarker(isCrit: damage >= 50f, isKill: faunaKilled);
+        }
+
         if (rb != null)
         {
             rb.linearVelocity = Vector3.zero;
@@ -93,23 +177,24 @@ public class ArrowProjectile : MonoBehaviour
             transform.SetParent(targetCol.transform, true);
         }
 
-        // 3. Toca som de impacto e cria pequenas lascas
         PlayImpactAudio();
-        SpawnImpactVFX(point, normal);
+        SpawnImpactVFX(targetCol, point, normal, hitShadow, hitFauna);
+        CreateArrowPickupArea(point);
 
-        // 4. Torna a flecha recuperável adicionando ResourcePickup (Flecha de Sílex ID 320)
+        Destroy(gameObject, 60f);
+    }
+
+    private void CreateArrowPickupArea(Vector3 point)
+    {
         GameObject pickupArea = new GameObject("Arrow_Pickup");
         pickupArea.transform.position = point;
         SphereCollider sc = pickupArea.AddComponent<SphereCollider>();
         sc.isTrigger = true;
         sc.radius = 1.0f;
         ResourcePickup pickup = pickupArea.AddComponent<ResourcePickup>();
-        pickup.itemID = 320;
+        pickup.itemID = pickupItemId;
         pickup.amount = 1;
         pickupArea.transform.SetParent(transform, true);
-
-        // Se passar de 60 segundos, destrói
-        Destroy(gameObject, 60f);
     }
 
     private void PlayImpactAudio()
@@ -119,7 +204,6 @@ public class ArrowProjectile : MonoBehaviour
         audio.minDistance = 2f;
         audio.maxDistance = 35f;
 
-        // Som sintetizado de flecha cravando na madeira
         int sampleRate = 44100;
         float dur = 0.18f;
         int count = (int)(sampleRate * dur);
@@ -139,8 +223,40 @@ public class ArrowProjectile : MonoBehaviour
         audio.PlayOneShot(clip, 0.75f);
     }
 
-    private void SpawnImpactVFX(Vector3 point, Vector3 normal)
+    private void SpawnImpactVFX(Collider targetCol, Vector3 point, Vector3 normal, bool isShadow, bool isFauna)
     {
+        if (VFXPoolManager.Instance != null)
+        {
+            if (isShadow)
+            {
+                VFXPoolManager.Instance.PlayShadowHitVFX(point);
+                return;
+            }
+            if (isFauna || (targetCol != null && targetCol.GetComponentInParent<WildlifeAIEngine>() != null))
+            {
+                VFXPoolManager.Instance.PlayBloodSplashVFX(point, normal);
+                return;
+            }
+
+            if (targetCol != null)
+            {
+                string n = targetCol.gameObject.name.ToLower();
+                if (n.Contains("rock") || n.Contains("stone") || n.Contains("ruin"))
+                {
+                    VFXPoolManager.Instance.PlaySparkVFX(point, normal);
+                    return;
+                }
+                if (n.Contains("tree") || n.Contains("trunk") || n.Contains("wood"))
+                {
+                    VFXPoolManager.Instance.PlayWoodChipVFX(point, normal);
+                    return;
+                }
+            }
+
+            VFXPoolManager.Instance.PlayBuildPlaceVFX(point);
+            return;
+        }
+
         GameObject vfxObj = new GameObject("ArrowImpactVFX");
         vfxObj.transform.position = point;
         ParticleSystem ps = vfxObj.AddComponent<ParticleSystem>();
