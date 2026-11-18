@@ -20,7 +20,7 @@ public class SkinningCarcass : MonoBehaviour
 
     private void Start()
     {
-        Destroy(gameObject, lifeTimeSeconds);
+        if (Application.isPlaying) Destroy(gameObject, lifeTimeSeconds);
     }
 
     public void Harvest(InventoryAdvanced inv)
@@ -37,15 +37,16 @@ public class SkinningCarcass : MonoBehaviour
         AddOrDrop(inv, hideItemId, finalHide);
         AddOrDrop(inv, boneItemId, finalBones);
         if (bonusDropId > 0 && hasKnife) AddOrDrop(inv, bonusDropId, 1);
+        if (hasKnife && inv != null) inv.DamageEquippedTool(EquipSlotType.MainHand, 1f);
 
         if (FirstPersonViewmodelController.Instance != null)
         {
-            FirstPersonViewmodelController.Instance.TriggerConsumeAnimation();
+            FirstPersonViewmodelController.Instance.TriggerGatherAnimation();
         }
 
         if (AudioManager.Instance != null)
         {
-            AudioManager.Instance.PlayPickupSound();
+            AudioManager.Instance.PlayFoley(AudioManager.FoleyEventType.HitFlesh, transform.position, 0.68f, 0.88f, 1.08f);
         }
 
         if (VFXPoolManager.Instance != null)
@@ -59,7 +60,8 @@ public class SkinningCarcass : MonoBehaviour
             HUDSurvivalOverlay.Instance.ShowLootTooltip($"Esfolou {animalDisplayName}: +{finalMeat} Carne, +{finalHide} Pele, +{finalBones} Osso{bonusTag}");
         }
 
-        Destroy(gameObject, 0.1f);
+        if (Application.isPlaying) Destroy(gameObject, 0.1f);
+        else gameObject.SetActive(false);
     }
 
     private void AddOrDrop(InventoryAdvanced inv, int itemId, int amount)

@@ -30,12 +30,12 @@ public class ProceduralGrassSystem : MonoBehaviour
     private Vector3 lastPlayerPos;
     private bool hasLastPlayerPos = false;
 
-    // Até 10 lotes de 1023 instâncias (10.230 instâncias máx no PC; 5 lotes no Mobile)
+    // Até 10 lotes de 1023 instâncias (10.230 instâncias máx no PC; 2 lotes no Mobile)
     private Matrix4x4[][] batchMatrices;
     private int[] batchCounts;
-    private int activeMaxBatches = 5;
+    private int activeMaxBatches = 2;
     private const int MAX_BATCHES_PC = 10;
-    private const int MAX_BATCHES_MOBILE = 5;
+    private const int MAX_BATCHES_MOBILE = 2;
     private const int BATCH_SIZE = 1023;
     private static readonly int FragaPlayerPosID = Shader.PropertyToID("_FragaPlayerPos");
 
@@ -51,8 +51,8 @@ public class ProceduralGrassSystem : MonoBehaviour
         }
         else
         {
-            grassDensity = Mathf.Min(grassDensity, 4800);
-            cullDistance = Mathf.Min(cullDistance, 45f);
+            grassDensity = Mathf.Min(grassDensity, 2000);
+            cullDistance = Mathf.Min(cullDistance, 28f);
         }
 
         RefreshMapBounds();
@@ -99,7 +99,8 @@ public class ProceduralGrassSystem : MonoBehaviour
     }
 
     /// Cria uma malha 3D volumétrica de Tufo Estrela (3 quads entrecruzados a 0°, 60°, 120°)
-    /// com curvatura natural e Vertex Color: R = Wind, G = Phase, B = Root-to-Tip AO
+    /// com curvatura natural e Vertex Color: R = Wind, G = Phase, B = Root-to-Tip AO.
+    /// O shader de folhagem já usa Cull Off + VFACE, portanto geramos apenas 1 face por quad (zero 4x overdraw!).
     private void CreateGrassMesh()
     {
         grassMesh = new Mesh();
@@ -116,7 +117,7 @@ public class ProceduralGrassSystem : MonoBehaviour
         Vector2[] uvs = new Vector2[numQuads * vertsPerQuad];
         Color[] colors = new Color[numQuads * vertsPerQuad];
         Vector3[] normals = new Vector3[numQuads * vertsPerQuad];
-        int[] triangles = new int[numQuads * trisPerQuad * 3 * 2];
+        int[] triangles = new int[numQuads * trisPerQuad * 3];
 
         int vIndex = 0;
         int tIndex = 0;
@@ -163,17 +164,11 @@ public class ProceduralGrassSystem : MonoBehaviour
             colors[vIndex + 5] = new Color(1.0f, phase, 1.0f, 1f);
             normals[vIndex + 5] = Vector3.up;
 
-            // Face frontal
+            // Face única (Cull Off no shader desenha frente e verso sem duplicar geometria)
             triangles[tIndex++] = baseV + 0; triangles[tIndex++] = baseV + 2; triangles[tIndex++] = baseV + 1;
             triangles[tIndex++] = baseV + 1; triangles[tIndex++] = baseV + 2; triangles[tIndex++] = baseV + 3;
             triangles[tIndex++] = baseV + 2; triangles[tIndex++] = baseV + 4; triangles[tIndex++] = baseV + 3;
             triangles[tIndex++] = baseV + 3; triangles[tIndex++] = baseV + 4; triangles[tIndex++] = baseV + 5;
-
-            // Face traseira (double-sided)
-            triangles[tIndex++] = baseV + 1; triangles[tIndex++] = baseV + 2; triangles[tIndex++] = baseV + 0;
-            triangles[tIndex++] = baseV + 3; triangles[tIndex++] = baseV + 2; triangles[tIndex++] = baseV + 1;
-            triangles[tIndex++] = baseV + 3; triangles[tIndex++] = baseV + 4; triangles[tIndex++] = baseV + 2;
-            triangles[tIndex++] = baseV + 5; triangles[tIndex++] = baseV + 4; triangles[tIndex++] = baseV + 3;
 
             vIndex += vertsPerQuad;
         }
@@ -284,8 +279,7 @@ public class ProceduralGrassSystem : MonoBehaviour
 
         if (playerTransform == null)
         {
-            GameObject p = GameObject.FindGameObjectWithTag("Player");
-            if (p != null) playerTransform = p.transform;
+            if (PlayerController.Instance != null) playerTransform = PlayerController.Instance.transform;
             else return;
         }
 
@@ -314,7 +308,8 @@ public class ProceduralGrassSystem : MonoBehaviour
         float cullDistSq = cullDistance * cullDistance;
 
         bool isTeleport = !hasLastPlayerPos || (playerPos - lastPlayerPos).sqrMagnitude > cullDistSq * 2.25f;
-        int recycleQuota = isTeleport ? grassDensity : 360;
+        int defaultQuota = Application.isMobilePlatform ? 160 : 360;
+        int recycleQuota = isTeleport ? grassDensity : defaultQuota;
         float minRecycleRadius = isTeleport ? 0f : cullDistance * 0.55f;
         lastPlayerPos = playerPos;
         hasLastPlayerPos = true;

@@ -7,7 +7,7 @@ public class CampfireCookingSystem : MonoBehaviour
     public GameManager gameManager;
 
     [Header("Settings")]
-    public float interactRange = 2.5f;
+    public float interactRange = 3.5f;
 
     private UIManager uiCache;
 
@@ -23,8 +23,37 @@ public class CampfireCookingSystem : MonoBehaviour
     {
         if (playerTransform == null && PlayerController.Instance != null) playerTransform = PlayerController.Instance.transform;
         if (inventory == null) inventory = InventoryAdvanced.Instance;
+        if (playerTransform == null || inventory == null) return;
+
+        // Prioriza BonfireEntity fisica no mundo (grelha 3D diegetica)
+        BonfireEntity nearestBonfire = FindNearestBonfire(playerTransform.position, interactRange + 1.2f);
+        if (nearestBonfire != null)
+        {
+            if (!nearestBonfire.isLit)
+            {
+                ShowMsg("Fogueira apagada! Acenda com Fosforos, Tocha ou Lampiao [L].");
+                return;
+            }
+
+            if (nearestBonfire.ReadySlotCount > 0)
+            {
+                nearestBonfire.TryCollectReadyItems(inventory, out string collectSummary);
+                ShowMsg(collectSummary);
+                return;
+            }
+
+            if (nearestBonfire.TryPlaceCookItemFromInventory(inventory, -1, out string placeMsg))
+            {
+                ShowMsg(placeMsg);
+                return;
+            }
+
+            ShowMsg(placeMsg);
+            return;
+        }
+
         if (gameManager == null) gameManager = FindAnyObjectByType<GameManager>();
-        if (playerTransform == null || gameManager == null || gameManager.mapDataPtr == System.IntPtr.Zero || inventory == null) return;
+        if (gameManager == null || gameManager.mapDataPtr == System.IntPtr.Zero) return;
 
         bool isNearCampfire = false;
         bool isNearCauldron = false;
@@ -62,61 +91,51 @@ public class CampfireCookingSystem : MonoBehaviour
             return;
         }
 
-        bool cookedSomething = false;
-
         if (isNearCauldron && inventory.HasItem(111) && inventory.HasItem(203) && inventory.HasItem(109))
         {
             inventory.RemoveItem(111, 1);
             inventory.RemoveItem(203, 1);
             inventory.RemoveItem(109, 1);
-            inventory.AddItem(208, 1);
-            cookedSomething = true;
+            AddOrDrop(208, 1);
+            if (VFXPoolManager.Instance != null) VFXPoolManager.Instance.PlayBuildPlaceVFX(playerTransform.position);
             ShowMsg("Preparou: Ensopado Druida!");
-        }
-        else if (inventory.HasItem(104))
-        {
-            inventory.RemoveItem(104, 1);
-            inventory.AddItem(200, 1);
-            cookedSomething = true;
-            ShowMsg("Assou: Carne Assada!");
-        }
-        else if (inventory.HasItem(113))
-        {
-            inventory.RemoveItem(113, 1);
-            inventory.AddItem(200, 1);
-            cookedSomething = true;
-            ShowMsg("Assou: Carne de Coelho!");
-        }
-        else if (inventory.HasItem(111))
-        {
-            inventory.RemoveItem(111, 1);
-            inventory.AddItem(207, 1);
-            cookedSomething = true;
-            ShowMsg("Assou: Peixe Assado!");
-        }
-        else if (inventory.HasItem(123))
-        {
-            inventory.RemoveItem(123, 1);
-            inventory.AddItem(109, 1);
-            cookedSomething = true;
-            ShowMsg("Ferveu: Agua Limpa purificada!");
-        }
-        else if (inventory.HasItem(109) && inventory.GetItemCount(103) >= 2)
-        {
-            inventory.RemoveItem(109, 1);
-            inventory.RemoveItem(103, 2);
-            inventory.AddItem(211, 1);
-            cookedSomething = true;
-            ShowMsg("Preparou: Cha de Ervas Quente!");
+            return;
         }
 
-        if (cookedSomething)
+        if (SurvivalInventoryCraftUI.Instance != null)
         {
-            if (VFXPoolManager.Instance != null) VFXPoolManager.Instance.PlayBuildPlaceVFX(playerTransform.position);
+            SurvivalInventoryCraftUI.Instance.OpenCraftingAtStation(isNearCauldron ? CraftingStationType.Cauldron : CraftingStationType.Bonfire);
+            return;
         }
-        else
+
+        ShowMsg("Use a grelha da fogueira ou a aba de Fabricacao.");
+    }
+
+    private static BonfireEntity FindNearestBonfire(Vector3 pos, float maxRadius)
+    {
+        BonfireEntity best = null;
+        float bestSq = maxRadius * maxRadius;
+        for (int i = 0; i < BonfireEntity.AllBonfires.Count; i++)
         {
-            ShowMsg("Sem carne ou peixe cru na mochila!");
+            BonfireEntity bf = BonfireEntity.AllBonfires[i];
+            if (bf == null) continue;
+            float dSq = (bf.transform.position - pos).sqrMagnitude;
+            if (dSq <= bestSq)
+            {
+                bestSq = dSq;
+                best = bf;
+            }
+        }
+        return best;
+    }
+
+    private void AddOrDrop(int itemId, int amount)
+    {
+        if (inventory == null || amount <= 0) return;
+        int leftover = inventory.AddItem(itemId, amount);
+        if (leftover > 0 && LootManager.Instance != null && playerTransform != null)
+        {
+            LootManager.Instance.DropItem(itemId, leftover, playerTransform.position + playerTransform.forward + Vector3.up * 0.5f);
         }
     }
 

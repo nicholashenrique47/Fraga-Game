@@ -71,7 +71,7 @@ public class GalicianWeatherEngine : MonoBehaviour
                 {
                     string label = next == GalicianWeatherState.Trevoada ? "Tempestade Atlantica se aproxima!"
                         : (next == GalicianWeatherState.NeboaMeiga ? "Nevoeiro denso cobre a Fraga..."
-                        : (next == GalicianWeatherState.Orballo ? "Chuva miuda galega comecou."
+                        : (next == GalicianWeatherState.Orballo ? "Chuva fina comecou na floresta."
                         : (next == GalicianWeatherState.SolDeOutono ? "O ceu abriu em Sol de Outono." : "Luar espectral ilumina a noite.")));
                     HUDSurvivalOverlay.Instance.ShowLootTooltip(label);
                 }

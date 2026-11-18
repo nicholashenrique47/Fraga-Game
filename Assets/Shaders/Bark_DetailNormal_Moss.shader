@@ -96,6 +96,25 @@
                 return posOS;
             }
 
+            float Hash21(float2 p)
+            {
+                p = frac(p * float2(123.34, 456.21));
+                p += dot(p, p + 45.32);
+                return frac(p.x * p.y);
+            }
+
+            float ValueNoise2D(float2 p)
+            {
+                float2 i = floor(p);
+                float2 f = frac(p);
+                f = f * f * (3.0 - 2.0 * f);
+                float a = Hash21(i);
+                float b = Hash21(i + float2(1.0, 0.0));
+                float c = Hash21(i + float2(0.0, 1.0));
+                float d = Hash21(i + float2(1.0, 1.0));
+                return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
+            }
+
             float Hash31(float3 p)
             {
                 p = frac(p * 0.1031);
@@ -150,8 +169,14 @@
                 float atten = light.distanceAttenuation * lerp(shadowFloor, 1.0, light.shadowAttenuation);
                 float3 halfDir = normalize(light.direction + viewDir);
                 float NdotH = saturate(dot(normalWS, halfDir));
+            #if defined(SHADER_API_MOBILE)
+                half spec2 = (half)(NdotH * NdotH);
+                half spec4 = spec2 * spec2;
+                float spec = spec4 * spec4 * smoothness * (0.04 + wetness * 0.30);
+            #else
                 float specPower = exp2(8.0 * smoothness + 1.0);
-                float spec = pow(NdotH, specPower) * smoothness * (0.04 + wetness * 0.30);
+                float spec = pow(max(NdotH, 1e-4), specPower) * smoothness * (0.04 + wetness * 0.30);
+            #endif
                 return (albedo * NdotL + spec) * light.color * atten;
             }
 
@@ -167,8 +192,12 @@
                 float3 bitangent = cross(worldNormal, input.tangentWS.xyz) * input.tangentWS.w;
                 float3 normalWS = normalize(TransformTangentToWorld(normalTS, float3x3(input.tangentWS.xyz, bitangent, worldNormal)));
 
-                // Smooth organic moss in object-space height + humid North side + 3D noise
+                // Smooth organic moss in object-space height + humid North side
+            #if defined(SHADER_API_MOBILE)
+                float mossNoise = ValueNoise2D(input.positionWS.xz * 1.35 + input.positionWS.y * 0.5);
+            #else
                 float mossNoise = Noise3D(input.positionWS * 1.35) * 0.65 + Noise3D(input.positionWS * 3.8) * 0.35;
+            #endif
                 float3 mossDir = normalize(_MossDirection.xyz);
                 float dirFactor = saturate(dot(normalWS, mossDir) * 0.8 + 0.35);
                 float heightFactor = 1.0 - smoothstep(_MossHeightCutoff - _MossHeightTransition, _MossHeightCutoff, input.heightOS + (mossNoise - 0.5) * 1.1);

@@ -77,6 +77,25 @@
             float _GlobalRainWetness;
             float _GlobalWetness;
 
+            float Hash21(float2 p)
+            {
+                p = frac(p * float2(123.34, 456.21));
+                p += dot(p, p + 45.32);
+                return frac(p.x * p.y);
+            }
+
+            float ValueNoise2D(float2 p)
+            {
+                float2 i = floor(p);
+                float2 f = frac(p);
+                f = f * f * (3.0 - 2.0 * f);
+                float a = Hash21(i);
+                float b = Hash21(i + float2(1.0, 0.0));
+                float c = Hash21(i + float2(0.0, 1.0));
+                float d = Hash21(i + float2(1.0, 1.0));
+                return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
+            }
+
             float Hash31(float3 p)
             {
                 p = frac(p * 0.1031);
@@ -129,8 +148,14 @@
                 float atten = light.distanceAttenuation * lerp(shadowFloor, 1.0, light.shadowAttenuation);
                 float3 halfDir = normalize(light.direction + viewDir);
                 float NdotH = saturate(dot(normalWS, halfDir));
+            #if defined(SHADER_API_MOBILE)
+                half spec2 = (half)(NdotH * NdotH);
+                half spec4 = spec2 * spec2;
+                float spec = spec4 * spec4 * smoothness * (0.06 + wetness * 0.45);
+            #else
                 float specPower = exp2(8.5 * smoothness + 1.0);
-                float spec = pow(NdotH, specPower) * smoothness * (0.06 + wetness * 0.45);
+                float spec = pow(max(NdotH, 1e-4), specPower) * smoothness * (0.06 + wetness * 0.45);
+            #endif
                 return (albedo * NdotL + spec) * light.color * atten;
             }
 
@@ -140,24 +165,36 @@
 
                 float3 geoNormal = normalize(input.normalWS);
 
-                // 1. Blend UV sample with world-space triplanar detail to eliminate any stretching on monoliths/ruins
+                // 1. Blend UV sample with world-space triplanar detail
                 half3 uvTex = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.uv).rgb;
+                float triScale = 0.48;
+            #if defined(SHADER_API_MOBILE)
+                float3 absN = abs(geoNormal);
+                float2 triUV = (absN.x >= absN.y && absN.x >= absN.z)
+                    ? input.positionWS.zy * triScale
+                    : ((absN.z >= absN.y) ? input.positionWS.xy * triScale : input.positionWS.xz * triScale);
+                half3 triTex = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, triUV).rgb;
+            #else
                 float3 triW = pow(abs(geoNormal), 4.0);
                 triW /= max(triW.x + triW.y + triW.z, 1e-4);
-                float triScale = 0.48;
                 half3 triTex =
                     SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.positionWS.zy * triScale).rgb * triW.x +
                     SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.positionWS.xz * triScale).rgb * triW.y +
                     SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.positionWS.xy * triScale).rgb * triW.z;
+            #endif
 
                 half3 stoneTex = lerp(uvTex, triTex, _TriplanarBlend) * _BaseColor.rgb;
 
                 // 2. Normal Mapping (UV + triplanar blend)
                 half3 uvNorm = UnpackNormalScale(SAMPLE_TEXTURE2D(_NormalMap, sampler_NormalMap, input.uv), _BumpScale);
+            #if defined(SHADER_API_MOBILE)
+                half3 triNorm = UnpackNormalScale(SAMPLE_TEXTURE2D(_NormalMap, sampler_NormalMap, triUV), _BumpScale);
+            #else
                 half3 triNorm =
                     UnpackNormalScale(SAMPLE_TEXTURE2D(_NormalMap, sampler_NormalMap, input.positionWS.zy * triScale), _BumpScale) * triW.x +
                     UnpackNormalScale(SAMPLE_TEXTURE2D(_NormalMap, sampler_NormalMap, input.positionWS.xz * triScale), _BumpScale) * triW.y +
                     UnpackNormalScale(SAMPLE_TEXTURE2D(_NormalMap, sampler_NormalMap, input.positionWS.xy * triScale), _BumpScale) * triW.z;
+            #endif
                 half3 normalTS = normalize(lerp(uvNorm, triNorm, _TriplanarBlend));
 
                 half3 bitangent = cross(geoNormal, input.tangentWS.xyz) * input.tangentWS.w;
@@ -165,8 +202,17 @@
 
                 half3 albedo = stoneTex;
 
-                // 3. Smooth 3D noise for Atlantic moss (object-space base + upward faces) & crustose lichen
+                // 3. Smooth noise for Atlantic moss & crustose lichen
+            #if defined(SHADER_API_MOBILE)
+                float2 ws2D = input.positionWS.xz + input.positionWS.y * 0.37;
+                float mossNoise = ValueNoise2D(ws2D * 1.45);
+                float lichenMacro = ValueNoise2D(ws2D * 2.3 + 17.3);
+                float lichenEdge = mossNoise;
+            #else
                 float mossNoise = Noise3D(input.positionWS * 1.45) * 0.65 + Noise3D(input.positionWS * 4.2) * 0.35;
+                float lichenMacro = Noise3D(input.positionWS * 2.1 + 17.3);
+                float lichenEdge = Noise3D(input.positionWS * 7.5 + 41.2);
+            #endif
                 float groundMoss = saturate((_MossThreshold - input.heightOS + (mossNoise - 0.5) * 0.7) * 1.4);
                 float topMoss = smoothstep(0.32, 0.82, normalWS.y + (mossNoise - 0.5) * 0.45) * 0.78;
                 float totalMoss = saturate(max(groundMoss * 0.85, topMoss));
@@ -174,9 +220,6 @@
                 half3 mossAlbedo = _MossColor.rgb * (0.72 + mossNoise * 0.65);
                 albedo = lerp(albedo, mossAlbedo, totalMoss * 0.88);
 
-                // Smooth organic lichen colonies (no pixel static!)
-                float lichenMacro = Noise3D(input.positionWS * 2.1 + 17.3);
-                float lichenEdge = Noise3D(input.positionWS * 7.5 + 41.2);
                 float lichenMask = smoothstep(0.60, 0.74, lichenMacro * 0.72 + lichenEdge * 0.28) * (1.0 - totalMoss);
                 albedo = lerp(albedo, _LichenColor.rgb * (0.85 + lichenEdge * 0.3), lichenMask * 0.52);
 

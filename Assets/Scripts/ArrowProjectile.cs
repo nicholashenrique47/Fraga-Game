@@ -79,6 +79,13 @@ public class ArrowProjectile : MonoBehaviour
                 return;
             }
 
+            if (BossSystem.Instance != null && BossSystem.Instance.IsActive &&
+                BossSystem.Instance.TryDamageInRay(sweepRay, stepDist, 0.95f, damage, out Vector3 bossHit, out bool bossKilled))
+            {
+                CompleteLivingHit(bossHit, -sweepRay.direction, bossKilled, isShadow: true);
+                return;
+            }
+
             rb.AddForce(Physics.gravity * (gravityMultiplier - 1f), ForceMode.Acceleration);
             transform.rotation = Quaternion.LookRotation(rb.linearVelocity);
         }
@@ -151,16 +158,23 @@ public class ArrowProjectile : MonoBehaviour
         bool hitShadow = VultoManager.Instance != null && VultoManager.Instance.TryDamageVultoAt(point, damage);
         bool faunaKilled = false;
         bool hitFauna = !hitShadow && FaunaManager.Instance != null && FaunaManager.Instance.TryDamageFaunaAt(point, damage, out faunaKilled);
+        BossSystem boss = targetCol != null ? targetCol.GetComponentInParent<BossSystem>() : null;
+        bool hitBoss = boss != null && boss.IsActive;
 
-        if (targetCol != null)
+        if (hitBoss)
         {
-            targetCol.SendMessageUpwards("TakeDamage", (int)damage, SendMessageOptions.DontRequireReceiver);
+            boss.TakeDamage(damage);
+            hitShadow = true;
+        }
+        else if (targetCol != null)
+        {
+            targetCol.SendMessageUpwards("TakeDamage", damage, SendMessageOptions.DontRequireReceiver);
         }
 
-        if (hitShadow || hitFauna || (targetCol != null && targetCol.GetComponentInParent<WildlifeAIEngine>() != null))
+        if (hitShadow || hitBoss || hitFauna || (targetCol != null && targetCol.GetComponentInParent<WildlifeAIEngine>() != null))
         {
             if (HUDSurvivalOverlay.Instance != null)
-                HUDSurvivalOverlay.Instance.TriggerHitMarker(isCrit: damage >= 50f, isKill: faunaKilled);
+                HUDSurvivalOverlay.Instance.TriggerHitMarker(isCrit: damage >= 50f, isKill: faunaKilled || (hitBoss && !boss.IsActive));
         }
 
         if (rb != null)
@@ -197,30 +211,36 @@ public class ArrowProjectile : MonoBehaviour
         pickupArea.transform.SetParent(transform, true);
     }
 
+    private static AudioClip s_fallbackImpactClip;
+
     private void PlayImpactAudio()
     {
+        if (AudioManager.Instance != null)
+        {
+            AudioManager.Instance.PlayFoley(AudioManager.FoleyEventType.ArrowImpact, transform.position, 0.78f, 0.90f, 1.12f, 32f);
+            return;
+        }
+
         AudioSource audio = gameObject.AddComponent<AudioSource>();
         audio.spatialBlend = 0.85f;
         audio.minDistance = 2f;
         audio.maxDistance = 35f;
 
-        int sampleRate = 44100;
-        float dur = 0.18f;
-        int count = (int)(sampleRate * dur);
-        float[] samples = new float[count];
-
-        for (int i = 0; i < count; i++)
+        if (s_fallbackImpactClip == null)
         {
-            float t = (float)i / count;
-            float thud = Mathf.Sin(2f * Mathf.PI * 180f * ((float)i / sampleRate)) * Mathf.Exp(-22f * t);
-            float snap = Random.Range(-0.3f, 0.3f) * Mathf.Exp(-12f * t);
-            samples[i] = (thud + snap) * 0.9f;
+            int sampleRate = 22050;
+            int count = (int)(sampleRate * 0.18f);
+            float[] samples = new float[count];
+            for (int i = 0; i < count; i++)
+            {
+                float t = (float)i / count;
+                samples[i] = Mathf.Sin(2f * Mathf.PI * 200f * ((float)i / sampleRate)) * Mathf.Exp(-22f * t) * 0.85f;
+            }
+            s_fallbackImpactClip = AudioClip.Create("ArrowHit_Procedural", count, 1, sampleRate, false);
+            s_fallbackImpactClip.SetData(samples, 0);
         }
-
-        AudioClip clip = AudioClip.Create("ArrowHit_Procedural", count, 1, sampleRate, false);
-        clip.SetData(samples, 0);
         audio.pitch = Random.Range(0.9f, 1.1f);
-        audio.PlayOneShot(clip, 0.75f);
+        audio.PlayOneShot(s_fallbackImpactClip, 0.75f);
     }
 
     private void SpawnImpactVFX(Collider targetCol, Vector3 point, Vector3 normal, bool isShadow, bool isFauna)

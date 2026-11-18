@@ -119,7 +119,7 @@ public class CompanionAI : MonoBehaviour
             currentCooldown = attackCooldown;
             if (VFXPoolManager.Instance != null) VFXPoolManager.Instance.PlayBuildPlaceVFX(transform.position);
             
-            if (audioCache != null) audioCache.PlayPickupSound(); // Som placeholder de hit
+            if (audioCache != null) audioCache.PlayFoley(AudioManager.FoleyEventType.HitFlesh, transform.position, 0.74f, 0.90f, 1.10f);
         }
     }
 }

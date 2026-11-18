@@ -74,6 +74,13 @@ public class ThrownSpearProjectile : MonoBehaviour
                 return;
             }
 
+            if (BossSystem.Instance != null && BossSystem.Instance.IsActive &&
+                BossSystem.Instance.TryDamageInRay(sweepRay, stepDist, 0.95f, damage, out Vector3 bHit, out bool bKilled))
+            {
+                StickOnLivingTarget(bHit, -sweepRay.direction, bKilled, isShadow: true);
+                return;
+            }
+
             rb.AddForce(Physics.gravity * (gravityMultiplier - 1f), ForceMode.Acceleration);
             transform.rotation = Quaternion.LookRotation(rb.linearVelocity.normalized);
         }
@@ -154,16 +161,23 @@ public class ThrownSpearProjectile : MonoBehaviour
         bool hitShadow = VultoManager.Instance != null && VultoManager.Instance.TryDamageVultoAt(point, damage);
         bool faunaKilled = false;
         bool hitFauna = !hitShadow && FaunaManager.Instance != null && FaunaManager.Instance.TryDamageFaunaAt(point, damage, out faunaKilled);
+        BossSystem boss = targetCol != null ? targetCol.GetComponentInParent<BossSystem>() : null;
+        bool hitBoss = boss != null && boss.IsActive;
 
-        if (targetCol != null)
+        if (hitBoss)
+        {
+            boss.TakeDamage(damage);
+            hitShadow = true;
+        }
+        else if (targetCol != null)
         {
             targetCol.SendMessageUpwards("TakeDamage", damage, SendMessageOptions.DontRequireReceiver);
         }
 
-        if (hitShadow || hitFauna || (targetCol != null && targetCol.GetComponentInParent<WildlifeAIEngine>() != null))
+        if (hitShadow || hitBoss || hitFauna || (targetCol != null && targetCol.GetComponentInParent<WildlifeAIEngine>() != null))
         {
             if (HUDSurvivalOverlay.Instance != null)
-                HUDSurvivalOverlay.Instance.TriggerHitMarker(isCrit: true, isKill: faunaKilled);
+                HUDSurvivalOverlay.Instance.TriggerHitMarker(isCrit: true, isKill: faunaKilled || (hitBoss && !boss.IsActive));
         }
 
         if (rb != null)

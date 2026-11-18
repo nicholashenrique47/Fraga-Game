@@ -2,16 +2,16 @@
 using System.Collections.Generic;
 
 /// <summary>
-/// Gerador Procedural de Árvores Atlânticas AAA (Padrão The Forest / Sons of the Forest para Fraga Game).
-/// Gera Carvalhos Centenários, Pinheiros Bravos e Árvores Mortas com raízes tubulares ancoradas ao terreno,
-/// ramos mestres bifurcados, tangentes calculadas para Normal Mapping PBR, e nuvens volumétricas
-/// de folhagem com prateleiras horizontais, Oclusão de Ambiente nos vértices (AO) e normais esféricas híbridas.
+/// Gerador Procedural de Arvores Atlanticas AAA (Padrao The Forest / Sons of the Forest para Fraga Game).
+/// Gera Carvalhos Centenarios, Pinheiros Bravos e Arvores Mortas com raizes tubulares ancoradas ao terreno,
+/// ramos mestres bifurcados, tangentes calculadas para Normal Mapping PBR, e nuvens volumetricas
+/// de folhagem com prateleiras horizontais, Oclusao de Ambiente nos vertices (AO) e normais esfericas hibridas.
 /// </summary>
 public class GalicianProceduralTreeGenerator : MonoBehaviour
 {
     public enum TreeType { GalicianOak, MaritimePine, DeadTree }
 
-    [Header("Configurações Botânicas")]
+    [Header("Configuracoes Botanicas")]
     public TreeType type = TreeType.GalicianOak;
     public float height = 14.5f;
     public float baseRadius = 0.60f;
@@ -92,10 +92,11 @@ public class GalicianProceduralTreeGenerator : MonoBehaviour
             foliageMR.sharedMaterial = folMat;
         }
 
+        // Collider solido generoso cobrindo tronco e raizes expostas para que o Machado sempre acerte de primeira
         CapsuleCollider col = root.AddComponent<CapsuleCollider>();
-        col.radius = baseRadius * 0.72f;
-        col.height = height * 0.85f;
-        col.center = new Vector3(0, height * 0.42f, 0);
+        col.radius = baseRadius * 1.18f;
+        col.height = height * 0.90f;
+        col.center = new Vector3(0f, height * 0.44f, 0f);
     }
 
     public Mesh GenerateTrunkMesh()
@@ -113,7 +114,7 @@ public class GalicianProceduralTreeGenerator : MonoBehaviour
         for (int y = 0; y <= heightSegments; y++)
         {
             float v = (float)y / heightSegments;
-            // Começa ligeiramente abaixo de zero (-0.25m) para ancorar em encostas sem flutuar
+            // Comeca ligeiramente abaixo de zero (-0.25m) para ancorar em encostas sem flutuar
             float currentHeight = Mathf.Lerp(-0.25f, height, v);
 
             float radius = Mathf.Lerp(baseRadius, topRadius, Mathf.Pow(v, 1.12f));
@@ -131,7 +132,7 @@ public class GalicianProceduralTreeGenerator : MonoBehaviour
                 curveZ = Mathf.Cos(v * 2.7f) * 0.44f;
             }
 
-            // Duplicar último vértice em u=1.0 para evitar costura de UV!
+            // Duplicar ultimo vertice em u=1.0 para evitar costura de UV!
             for (int r = 0; r <= radialSegments; r++)
             {
                 float u = (float)r / radialSegments;
@@ -177,7 +178,7 @@ public class GalicianProceduralTreeGenerator : MonoBehaviour
             }
         }
 
-        // Raízes tubulares expostas cravadas no solo
+        // Raizes tubulares expostas cravadas no solo
         AddButtressRoots(vertices, normals, uvs, triangles);
 
         if (type == TreeType.GalicianOak)
@@ -236,7 +237,7 @@ public class GalicianProceduralTreeGenerator : MonoBehaviour
 
             AddCurvedTube(new Vector3[] { startPos, midPos, endPos }, new float[] { 0.28f, 0.17f, 0.07f }, 7, verts, norms, uvs, tris);
 
-            // Bifurcação secundária para silhueta natural de carballo
+            // Bifurcacao secundaria para silhueta natural de carballo
             for (int f = -1; f <= 1; f += 2)
             {
                 float subAng = angRad + f * 0.55f;

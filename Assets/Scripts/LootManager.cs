@@ -25,14 +25,11 @@ public class LootManager : MonoBehaviour
     private readonly Matrix4x4[] renderMatrices = new Matrix4x4[1023]; // Limite do GPU Instancing por batch
 
     public static LootManager Instance;
-    private UIManager uiCache;
     private AudioManager audioCache;
-    private bool hadNearbyTooltip = false;
 
     private void Awake()
     {
         Instance = this;
-        uiCache = FindAnyObjectByType<UIManager>();
         audioCache = AudioManager.Instance ?? FindAnyObjectByType<AudioManager>();
 
         if (sackMesh == null)
@@ -102,35 +99,17 @@ public class LootManager : MonoBehaviour
             inventory = InventoryAdvanced.Instance;
 
         if (playerTransform == null || inventory == null || droppedItems.Count == 0)
-        {
-            if (hadNearbyTooltip && uiCache != null)
-            {
-                uiCache.SetLootTooltip("");
-                hadNearbyTooltip = false;
-            }
             return;
-        }
 
         if (Time.frameCount % 5 != 0) return;
 
         Vector3 pPos = playerTransform.position;
         float radiusSq = pickupRadius * pickupRadius;
-        float tooltipRadiusSq = (pickupRadius * 2f) * (pickupRadius * 2f);
-
-        float closestDistSq = float.MaxValue;
-        int closestItemID = -1;
-        bool pickedUpAny = false;
 
         for (int i = droppedItems.Count - 1; i >= 0; i--)
         {
             Vector3 diff = droppedItems[i].position - pPos;
             float distSq = diff.sqrMagnitude;
-
-            if (distSq < tooltipRadiusSq && distSq < closestDistSq)
-            {
-                closestDistSq = distSq;
-                closestItemID = droppedItems[i].itemID;
-            }
 
             if (distSq <= radiusSq)
             {
@@ -139,38 +118,13 @@ public class LootManager : MonoBehaviour
 
                 if (leftover == 0)
                 {
-                    ItemData pickedData = ItemDatabase.GetItem(itemId);
-                    string msg = $"+1 {(pickedData != null ? pickedData.itemName : "Item")}";
-
                     if (audioCache == null) audioCache = AudioManager.Instance;
                     if (audioCache != null) audioCache.PlayPickupSound();
 
-                    if (HUDSurvivalOverlay.Instance != null)
-                        HUDSurvivalOverlay.Instance.ShowLootTooltip(msg);
-                    else if (uiCache != null)
-                        uiCache.SetLootTooltip(msg);
-
                     droppedItems.RemoveAt(i);
                     UpdateMatrices();
-                    pickedUpAny = true;
-                    hadNearbyTooltip = false;
                     break;
                 }
-            }
-        }
-
-        if (!pickedUpAny && uiCache != null)
-        {
-            if (closestItemID != -1)
-            {
-                ItemData data = ItemDatabase.GetItem(closestItemID);
-                uiCache.SetLootTooltip(data != null ? $"[ {data.itemName} ]" : "");
-                hadNearbyTooltip = true;
-            }
-            else if (hadNearbyTooltip)
-            {
-                uiCache.SetLootTooltip("");
-                hadNearbyTooltip = false;
             }
         }
     }

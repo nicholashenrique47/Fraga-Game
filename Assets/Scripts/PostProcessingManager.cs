@@ -43,6 +43,7 @@ public class PostProcessingManager : MonoBehaviour
     private float lastFlashTime = -10f;
     private bool isDeathSequenceActive = false;
     private float deathSequenceTimer = 0f;
+    private bool isMobileLowCost = false;
 
     // Valores base capturados no Start para interpolar contra
     private float baseVignetteIntensity = 0.08f;
@@ -63,6 +64,7 @@ public class PostProcessingManager : MonoBehaviour
     {
         if (sanitySystem == null) sanitySystem = FindAnyObjectByType<SanitySystem>();
         if (playerStatus == null) playerStatus = FindAnyObjectByType<PlayerStatus>();
+        isMobileLowCost = Application.isMobilePlatform;
 
         // 0. Garante que o deathOverlay comece 100% invisível e não-bloqueante
         if (deathOverlay == null)
@@ -127,20 +129,24 @@ public class PostProcessingManager : MonoBehaviour
         }
         if (filmGrain != null)
         {
+            filmGrain.active = !isMobileLowCost;
             filmGrain.intensity.overrideState = true;
             filmGrain.type.overrideState = true;
             filmGrain.type.value = FilmGrainLookup.Thin1;
         }
         if (lensDistortion != null)
         {
+            lensDistortion.active = false;
             lensDistortion.intensity.overrideState = true;
         }
         if (chromaticAberration != null)
         {
+            chromaticAberration.active = false;
             chromaticAberration.intensity.overrideState = true;
         }
         if (motionBlur != null)
         {
+            motionBlur.active = false;
             motionBlur.intensity.overrideState = true;
             motionBlur.quality.overrideState = true;
             motionBlur.quality.value = MotionBlurQuality.Low; // Mobile-safe
@@ -154,13 +160,25 @@ public class PostProcessingManager : MonoBehaviour
         {
             bloom.intensity.overrideState = true;
             bloom.threshold.overrideState = true;
-            bloom.intensity.value = 0.35f;
-            bloom.threshold.value = 1.15f;
+            if (isMobileLowCost)
+            {
+                // Mobile: desativa Bloom caro por padrao (economia massiva de mip-chain & largura de banda TBDR)
+                bloom.active = false;
+                bloom.intensity.value = 0f;
+            }
+            else
+            {
+                bloom.active = true;
+                bloom.intensity.value = 0.35f;
+                bloom.threshold.value = 1.15f;
+            }
         }
         if (depthOfField != null)
         {
+            // Mobile: DoF Gaussian exige DepthTexture + multiplas passagens de blur por frame; manter apenas em PC
+            depthOfField.active = !isMobileLowCost;
             depthOfField.mode.overrideState = true;
-            depthOfField.mode.value = DepthOfFieldMode.Gaussian;
+            depthOfField.mode.value = isMobileLowCost ? DepthOfFieldMode.Off : DepthOfFieldMode.Gaussian;
             depthOfField.gaussianStart.overrideState = true;
             depthOfField.gaussianEnd.overrideState = true;
             depthOfField.gaussianMaxRadius.overrideState = true;
@@ -221,20 +239,13 @@ public class PostProcessingManager : MonoBehaviour
         {
             StartCoroutine(DamageFlashCoroutine(25f));
             lastFlashTime = Time.time;
-            
-            // Hit-Stop leve
-            if (!isDeathSequenceActive)
+
+            // Hit-Stop seguro via GameFeelManager (respeita pause/modais/morte)
+            if (!isDeathSequenceActive && GameFeelManager.Instance != null)
             {
-                StartCoroutine(HitStopCoroutine());
+                GameFeelManager.Instance.TriggerHitstop(0.045f, 0.12f);
             }
         }
-    }
-
-    private IEnumerator HitStopCoroutine()
-    {
-        Time.timeScale = 0.1f;
-        yield return new WaitForSecondsRealtime(0.05f);
-        Time.timeScale = 1f;
     }
 
     /// Interpolacao continua dos efeitos baseada na sanidade atual.
@@ -318,7 +329,7 @@ public class PostProcessingManager : MonoBehaviour
             colorAdjustments.contrast.value = Mathf.Lerp(baseContrast, 20f, t) + currentRegionContrastOffset;
             colorAdjustments.colorFilter.value = currentRegionTint;
 
-            // Exposicao: sempre nítido (+0.50 EV) durante jogo normal, escurece apenas em pânico real extremo
+            // Exposicao: sempre nitido (+0.50 EV) durante jogo normal, escurece apenas em panico real extremo
             if (sanity < 20f)
             {
                 float darkT = (20f - sanity) / 20f;
@@ -330,45 +341,59 @@ public class PostProcessingManager : MonoBehaviour
             }
         }
 
-        // Camada 3: Film Grain (paranoia visual)
+        // Camada 3: Film Grain (paranoia visual - apenas PC ou sanidade baixa)
         if (filmGrain != null)
         {
-            filmGrain.intensity.value = Mathf.Lerp(baseGrainIntensity, 0.65f, t);
+            bool enableGrain = !isMobileLowCost && t > 0.1f;
+            filmGrain.active = enableGrain;
+            if (enableGrain)
+            {
+                filmGrain.intensity.value = Mathf.Lerp(baseGrainIntensity, 0.65f, t);
+            }
         }
 
-        // Camada 4: Distorcao de lente (instabilidade mental)
+        // Camada 4: Distorcao de lente (instabilidade mental - so ativa quando necessaria)
         if (lensDistortion != null)
         {
             if (sanity < 35f)
             {
+                lensDistortion.active = true;
                 float distT = (35f - sanity) / 35f;
                 float wave = Mathf.Sin(Time.time * 2.0f) * distT;
                 lensDistortion.intensity.value = Mathf.Lerp(baseLensDistortion, -0.2f, distT) + wave * 0.05f;
             }
             else
             {
+                lensDistortion.active = false;
                 lensDistortion.intensity.value = baseLensDistortion;
             }
         }
 
-        // Camada 5: Aberracao cromatica (visao danificada)
+        // Camada 5: Aberracao cromatica (visao danificada - so ativa em panico)
         if (chromaticAberration != null)
         {
             if (sanity < 25f)
             {
+                chromaticAberration.active = true;
                 float chromaT = (25f - sanity) / 25f;
                 chromaticAberration.intensity.value = Mathf.Lerp(baseChromaticAberration, 0.45f, chromaT);
             }
-            else
+            else if (Time.time - lastFlashTime > flashDuration + 0.05f)
             {
+                chromaticAberration.active = false;
                 chromaticAberration.intensity.value = baseChromaticAberration;
             }
         }
 
-        // Camada 6: Motion Blur em panico extremo
+        // Camada 6: Motion Blur apenas em PC em panico extremo
         if (motionBlur != null)
         {
-            motionBlur.intensity.value = sanity < 12f ? Mathf.Lerp(0f, 0.3f, (12f - sanity) / 12f) : 0f;
+            bool enableBlur = !isMobileLowCost && sanity < 12f;
+            motionBlur.active = enableBlur;
+            if (enableBlur)
+            {
+                motionBlur.intensity.value = Mathf.Lerp(0f, 0.3f, (12f - sanity) / 12f);
+            }
         }
     }
 
@@ -378,10 +403,12 @@ public class PostProcessingManager : MonoBehaviour
         float normalizedIntensity = Mathf.Clamp01(intensity / 30f);
         float elapsed = 0f;
 
+        if (chromaticAberration != null) chromaticAberration.active = true;
+
         while (elapsed < flashDuration)
         {
             float t = elapsed / flashDuration;
-            float flashCurve = 1f - (t * t); // Ease-out quadratico
+            float flashCurve = 1f - (t * t);
 
             if (vignette != null)
             {

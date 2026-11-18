@@ -68,6 +68,44 @@ public class VultoManager : MonoBehaviour
     private int currentActiveVultos = 0;
     public int ActiveVultoCount => currentActiveVultos;
 
+    /// <summary>
+    /// Retorna intensidade de ameaca normalizada (0..1) considerando Vultos ativos e Boss.
+    /// </summary>
+    public float GetThreatIntensity01()
+    {
+        float baseThreat = Mathf.Clamp01(currentActiveVultos / 8f);
+        if (BossSystem.Instance != null && BossSystem.Instance.IsActive)
+            baseThreat = Mathf.Max(baseThreat, BossSystem.Instance.IsEnraged ? 1f : 0.85f);
+        return baseThreat;
+    }
+
+    /// <summary>
+    /// Hook Multiplayer-Ready: escolhe a posicao do jogador vivo mais proximo registrado na sessao Co-op.
+    /// Mantem fallback direto para playerTransform no modo Solo sem alterar o ABI nativo.
+    /// </summary>
+    public Vector3 GetNearestTargetPlayerPosition(Vector3 fromWorldPos)
+    {
+        Vector3 fallback = playerTransform != null ? playerTransform.position : fromWorldPos;
+        if (FragaCoopSession.Instance == null || !FragaCoopSession.Instance.IsCoopSessionActive)
+            return fallback;
+
+        var members = FragaCoopSession.Instance.Members;
+        float bestDistSq = float.MaxValue;
+        Vector3 bestPos = fallback;
+        for (int i = 0; i < members.Count; i++)
+        {
+            var m = members[i];
+            if (!m.isConnected || m.isDowned) continue;
+            float dSq = (m.worldPosition - fromWorldPos).sqrMagnitude;
+            if (dSq < bestDistSq)
+            {
+                bestDistSq = dSq;
+                bestPos = m.worldPosition;
+            }
+        }
+        return bestPos;
+    }
+
     private int mapWidth;
     private int mapHeight;
     private System.IntPtr flowFieldXPtr;
@@ -311,7 +349,7 @@ public class VultoManager : MonoBehaviour
                 }
             }
 
-            // Reacao a Circulo de Sal (tile 16 no grid nativo)
+            // Reacao a Circulo de Sal (tile 25 no grid nativo)
             if (gmCache != null && gmCache.mapDataPtr != System.IntPtr.Zero && sqrDist < 484f)
             {
                 int gx = Mathf.RoundToInt(posXArray[i]);
@@ -319,7 +357,7 @@ public class VultoManager : MonoBehaviour
                 if (gx >= 1 && gx < gmCache.mapWidth - 1 && gz >= 1 && gz < gmCache.mapHeight - 1)
                 {
                     int cell = ResourceManager.GetMapCell(gmCache.mapDataPtr, gmCache.mapWidth, gmCache.mapHeight, gx, gz);
-                    if (cell == 16)
+                    if (cell == 25)
                     {
                         float inv = sqrDist > 0.01f ? 1f / Mathf.Sqrt(sqrDist) : 1f;
                         posXArray[i] += dx * inv * 6.0f * dt;
@@ -464,20 +502,39 @@ public class VultoManager : MonoBehaviour
             {
                 if (sqrDistToPlayer <= attackRadius * attackRadius)
                 {
-                    if (pStatus != null) pStatus.TakeDamage(attackDamage);
-                    if (pController != null)
+                    if (pController != null && pController.IsInvulnerable)
                     {
-                        Vector3 knockbackDir = (playerTransform.position - pos).normalized;
-                        knockbackDir.y = 0f;
-                        pController.ApplyKnockback(knockbackDir * 5.2f);
+                        if (HUDSurvivalOverlay.Instance != null)
+                            HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#55FFDD>ESQUIVA SOMBRIA!</color>");
+                        nextAttackTime = now + 0.85f;
+                        playerHitThisFrame = true;
                     }
+                    else
+                    {
+                        if (pStatus != null)
+                        {
+                            float hpBefore = pStatus.health;
+                            pStatus.TakeDamage(attackDamage);
+                            if (pStatus.health < hpBefore - 1f && Random.value < 0.20f)
+                            {
+                                pStatus.ApplyBleeding();
+                            }
+                        }
+                        if (pController != null)
+                        {
+                            Vector3 knockbackDir = (playerTransform.position - pos).normalized;
+                            knockbackDir.y = 0f;
+                            pController.ApplyKnockback(knockbackDir * 5.2f);
+                        }
 
-                    if (audioManagerCache != null) audioManagerCache.PlayVultoAttackSound();
-                    if (ui != null) ui.ShowDamageFromDirection(pos);
-                    if (haptic != null) haptic.TriggerHeavyVibration();
+                        if (audioManagerCache != null) audioManagerCache.PlayVultoAttackSound();
+                        if (HUDSurvivalOverlay.Instance != null) HUDSurvivalOverlay.Instance.ShowDamageFromDirection(pos);
+                        else if (ui != null) ui.ShowDamageFromDirection(pos);
+                        if (haptic != null) haptic.TriggerHeavyVibration();
 
-                    nextAttackTime = now + attackCooldown;
-                    playerHitThisFrame = true;
+                        nextAttackTime = now + attackCooldown;
+                        playerHitThisFrame = true;
+                    }
                 }
             }
         }

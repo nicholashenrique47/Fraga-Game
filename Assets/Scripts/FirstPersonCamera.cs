@@ -12,6 +12,7 @@ public class FirstPersonCamera : MonoBehaviour
     public CameraTouchController touchController;
     private Camera cam;
     private PlayerController playerController;
+    private PlayerStatus playerStatusCache;
 
     [Header("Settings")]
     public float mouseSensitivity = 1.6f;
@@ -65,6 +66,7 @@ public class FirstPersonCamera : MonoBehaviour
         if (playerBody != null)
         {
             playerController = playerBody.GetComponent<PlayerController>();
+            playerStatusCache = playerBody.GetComponent<PlayerStatus>();
         }
 
         currentEyeHeight = eyeHeightStanding;
@@ -209,8 +211,10 @@ public class FirstPersonCamera : MonoBehaviour
                           (SurvivalInventoryCraftUI.Instance != null && SurvivalInventoryCraftUI.Instance.IsOpen) ||
                           (RadialQuickSelectUI.Instance != null && RadialQuickSelectUI.Instance.IsOpen) ||
                           (FragaOptionsMenu.Instance != null && FragaOptionsMenu.Instance.IsOpen) ||
+                          (BlueprintPlacementManager.Instance != null && BlueprintPlacementManager.Instance.IsBookOpen) ||
                           StorageChestInteractable.IsAnyChestOpen ||
-                          UIManager.IsEndgameModalOpen;
+                          UIManager.IsEndgameModalOpen ||
+                          (playerStatusCache != null && playerStatusCache.IsDead);
 
         if (uiBlocking)
         {
@@ -222,7 +226,8 @@ public class FirstPersonCamera : MonoBehaviour
             return;
         }
 
-        if (Input.GetMouseButtonDown(0) && Input.touchCount == 0 && IsDesktopPlatform())
+        bool touchMode = FragaInputRouter.Instance != null && FragaInputRouter.Instance.IsTouchControlsActive;
+        if (!touchMode && Input.GetMouseButtonDown(0) && Input.touchCount == 0 && IsDesktopPlatform())
         {
             if (!FragaInputRouter.IsAnyPointerOverUI())
             {
@@ -230,6 +235,8 @@ public class FirstPersonCamera : MonoBehaviour
                 Cursor.visible = false;
             }
         }
+
+        if (touchController == null) touchController = CameraTouchController.Instance;
 
         if (Input.GetKeyDown(KeyCode.Escape) && IsDesktopPlatform())
         {

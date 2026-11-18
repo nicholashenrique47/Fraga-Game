@@ -172,8 +172,12 @@ public class BowAndArrowSystem : MonoBehaviour
         if (inventory != null)
         {
             inventory.RemoveItem(activeArrowId, 1);
+            if (inventory.equippedMainHandId == 305)
+                inventory.DamageEquippedTool(EquipSlotType.MainHand, 1f);
         }
 
+        if (AudioManager.Instance != null)
+            AudioManager.Instance.PlayFoley(AudioManager.FoleyEventType.SwingLight, transform.position, 0.72f, 1.05f, 1.18f);
         if (audioSource != null && releaseClip != null)
         {
             audioSource.pitch = Random.Range(0.95f, 1.08f);
@@ -218,9 +222,13 @@ public class BowAndArrowSystem : MonoBehaviour
 
         ArrowProjectile arrowProj = arrowObj.GetComponent<ArrowProjectile>() ?? arrowObj.AddComponent<ArrowProjectile>();
         float bonusMult = (activeArrowId == 117) ? 1.45f : 1.0f;
+        bool isStealthCrit = FragaStealthSystem.Instance != null && FragaStealthSystem.Instance.IsHidden;
+        float stealthMult = isStealthCrit ? 1.75f : 1.0f;
         float speed = Mathf.Lerp(minArrowSpeed, maxArrowSpeed, drawProgress) * bonusMult;
-        float damage = baseDamage * Mathf.Lerp(0.55f, 1.45f, drawProgress) * bonusMult;
+        float damage = baseDamage * Mathf.Lerp(0.55f, 1.45f, drawProgress) * bonusMult * stealthMult;
         arrowProj.Launch(forward * speed, damage, activeArrowId, transform);
+        if (isStealthCrit && HUDSurvivalOverlay.Instance != null)
+            HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#44FFCC>DISPARO FURTIVO!</color>");
 
         if (FirstPersonCamera.Instance != null)
         {
@@ -230,16 +238,21 @@ public class BowAndArrowSystem : MonoBehaviour
 
     private AudioClip GenerateBowDrawSound()
     {
-        int sampleRate = 44100;
+        int sampleRate = 22050;
         float dur = 0.45f;
         int count = (int)(sampleRate * dur);
         float[] samples = new float[count];
+        uint seed = 81001u;
+        float lp = 0f;
         for (int i = 0; i < count; i++)
         {
             float t = (float)i / count;
+            seed = seed * 1664525u + 1013904223u;
+            float w = ((seed >> 16) / 65535f) * 2f - 1f;
+            lp = Mathf.Lerp(lp, w, 0.14f);
             float creak = Mathf.Sin(2f * Mathf.PI * (160f + t * 40f) * ((float)i / sampleRate)) * Mathf.Exp(-3f * (1f - t)) * 0.35f;
-            float tension = Random.Range(-0.2f, 0.2f) * t * 0.3f;
-            samples[i] = creak + tension;
+            float tension = lp * t * 0.24f;
+            samples[i] = Mathf.Clamp(creak + tension, -1f, 1f);
         }
         AudioClip clip = AudioClip.Create("BowDraw_Procedural", count, 1, sampleRate, false);
         clip.SetData(samples, 0);
@@ -248,16 +261,22 @@ public class BowAndArrowSystem : MonoBehaviour
 
     private AudioClip GenerateBowReleaseSound()
     {
-        int sampleRate = 44100;
+        int sampleRate = 22050;
         float dur = 0.22f;
         int count = (int)(sampleRate * dur);
         float[] samples = new float[count];
+        uint seed = 81009u;
+        float lp1 = 0f, lp2 = 0f;
         for (int i = 0; i < count; i++)
         {
             float t = (float)i / count;
+            seed = seed * 1664525u + 1013904223u;
+            float w = ((seed >> 16) / 65535f) * 2f - 1f;
+            lp1 = Mathf.Lerp(lp1, w, 0.26f);
+            lp2 = Mathf.Lerp(lp2, lp1, 0.08f);
             float snap = Mathf.Sin(2f * Mathf.PI * 340f * ((float)i / sampleRate)) * Mathf.Exp(-18f * t) * 0.8f;
-            float whoosh = Random.Range(-0.4f, 0.4f) * Mathf.Exp(-12f * t) * 0.4f;
-            samples[i] = snap + whoosh;
+            float whoosh = (lp1 - lp2) * Mathf.Exp(-12f * t) * 0.45f;
+            samples[i] = Mathf.Clamp(snap + whoosh, -1f, 1f);
         }
         AudioClip clip = AudioClip.Create("BowRelease_Procedural", count, 1, sampleRate, false);
         clip.SetData(samples, 0);
@@ -266,14 +285,19 @@ public class BowAndArrowSystem : MonoBehaviour
 
     private AudioClip GenerateDryFireSound()
     {
-        int sampleRate = 44100;
+        int sampleRate = 22050;
         float dur = 0.12f;
         int count = (int)(sampleRate * dur);
         float[] samples = new float[count];
+        uint seed = 81017u;
+        float lp = 0f;
         for (int i = 0; i < count; i++)
         {
             float t = (float)i / count;
-            samples[i] = Random.Range(-0.3f, 0.3f) * Mathf.Exp(-28f * t);
+            seed = seed * 1664525u + 1013904223u;
+            float w = ((seed >> 16) / 65535f) * 2f - 1f;
+            lp = Mathf.Lerp(lp, w, 0.28f);
+            samples[i] = Mathf.Clamp(lp * Mathf.Exp(-28f * t) * 0.42f, -1f, 1f);
         }
         AudioClip clip = AudioClip.Create("BowDryFire_Procedural", count, 1, sampleRate, false);
         clip.SetData(samples, 0);

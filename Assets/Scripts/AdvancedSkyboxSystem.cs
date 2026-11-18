@@ -29,6 +29,16 @@ public class AdvancedSkyboxSystem : MonoBehaviour
     private ParticleSystem auroraParticles;
     public PlayerStatus playerStatusRef; // Para verificar temperatura
 
+    private static Shader FindSafeShader(params string[] candidates)
+    {
+        foreach (string name in candidates)
+        {
+            Shader s = Shader.Find(name);
+            if (s != null && s.name != "Hidden/InternalErrorShader") return s;
+        }
+        return Shader.Find("Sprites/Default");
+    }
+
     private Texture2D LoadParticleTexture(string resourceName)
     {
         Texture2D tex = Resources.Load<Texture2D>("Textures/" + resourceName);
@@ -61,24 +71,20 @@ public class AdvancedSkyboxSystem : MonoBehaviour
     private void CreateSkybox()
     {
         // Tenta carregar o skybox procedural (gradiente)
-        skyboxMat = new Material(Shader.Find("Skybox/Procedural"));
-        if (skyboxMat == null || skyboxMat.shader == null || skyboxMat.shader.name == "Hidden/InternalErrorShader")
+        Shader skyShader = FindSafeShader("Skybox/Procedural", "Skybox/Solid Color", "Universal Render Pipeline/Unlit", "Universal Render Pipeline/Lit", "Sprites/Default");
+        if (skyShader != null)
         {
-            // Fallback para cor sólida
-            skyboxMat = new Material(Shader.Find("Skybox/Solid Color"));
-            if (skyboxMat.shader == null) skyboxMat = new Material(Shader.Find("Standard"));
+            skyboxMat = new Material(skyShader);
+            if (skyShader.name == "Skybox/Procedural")
+            {
+                skyboxMat.SetFloat("_SunSize", 0.04f);
+                skyboxMat.SetFloat("_SunSizeConvergence", 5f);
+                skyboxMat.SetFloat("_AtmosphereThickness", 1.2f);
+                skyboxMat.SetFloat("_Exposure", 1.35f);
+            }
+            RenderSettings.skybox = skyboxMat;
+            DynamicGI.UpdateEnvironment();
         }
-        else
-        {
-            // Configurar o skybox procedural
-            skyboxMat.SetFloat("_SunSize", 0.04f);
-            skyboxMat.SetFloat("_SunSizeConvergence", 5f);
-            skyboxMat.SetFloat("_AtmosphereThickness", 1.2f);
-            skyboxMat.SetFloat("_Exposure", 1.35f);
-        }
-
-        RenderSettings.skybox = skyboxMat;
-        DynamicGI.UpdateEnvironment();
 
         // Criar aurora boreal
         CreateAuroraBorealis();
@@ -137,19 +143,22 @@ public class AdvancedSkyboxSystem : MonoBehaviour
 
         // Renderer com textura suave (sem quadrados)
         var renderer = auroraParticles.GetComponent<ParticleSystemRenderer>();
-        Material auroraMat = new Material(Shader.Find("Universal Render Pipeline/Particles/Unlit"));
-        if (auroraMat.shader == null) auroraMat = new Material(Shader.Find("Particles/Standard Unlit"));
-        Texture2D mistTex = LoadParticleTexture("soft_mist_puff");
-        auroraMat.SetTexture("_BaseMap", mistTex);
-        auroraMat.mainTexture = mistTex;
-        auroraMat.SetColor("_BaseColor", new Color(0.2f, 0.8f, 0.4f, 0.06f));
-        auroraMat.color = new Color(0.2f, 0.8f, 0.4f, 0.06f);
-        auroraMat.SetFloat("_Surface", 1);
-        auroraMat.SetInt("_ZWrite", 0);
-        auroraMat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-        auroraMat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.One); // Additive blending
-        auroraMat.renderQueue = 2900;
-        renderer.material = auroraMat;
+        Shader particleShader = FindSafeShader("Universal Render Pipeline/Particles/Unlit", "Particles/Standard Unlit", "Universal Render Pipeline/Unlit", "Sprites/Default");
+        if (particleShader != null)
+        {
+            Material auroraMat = new Material(particleShader);
+            Texture2D mistTex = LoadParticleTexture("soft_mist_puff");
+            if (auroraMat.HasProperty("_BaseMap")) auroraMat.SetTexture("_BaseMap", mistTex);
+            auroraMat.mainTexture = mistTex;
+            if (auroraMat.HasProperty("_BaseColor")) auroraMat.SetColor("_BaseColor", new Color(0.2f, 0.8f, 0.4f, 0.06f));
+            auroraMat.color = new Color(0.2f, 0.8f, 0.4f, 0.06f);
+            if (auroraMat.HasProperty("_Surface")) auroraMat.SetFloat("_Surface", 1);
+            if (auroraMat.HasProperty("_ZWrite")) auroraMat.SetInt("_ZWrite", 0);
+            if (auroraMat.HasProperty("_SrcBlend")) auroraMat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            if (auroraMat.HasProperty("_DstBlend")) auroraMat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.One); // Additive blending
+            auroraMat.renderQueue = 2900;
+            renderer.material = auroraMat;
+        }
         renderer.renderMode = ParticleSystemRenderMode.HorizontalBillboard;
 
         auroraParticles.Stop();
@@ -196,19 +205,22 @@ public class AdvancedSkyboxSystem : MonoBehaviour
         colorOverLifetime.color = grad;
 
         var renderer = starParticles.GetComponent<ParticleSystemRenderer>();
-        Material starMat = new Material(Shader.Find("Universal Render Pipeline/Particles/Unlit"));
-        if (starMat.shader == null) starMat = new Material(Shader.Find("Particles/Standard Unlit"));
-        Texture2D glowTex = LoadParticleTexture("soft_particle_glow");
-        starMat.SetTexture("_BaseMap", glowTex);
-        starMat.mainTexture = glowTex;
-        starMat.SetColor("_BaseColor", Color.white);
-        starMat.color = Color.white;
-        starMat.SetFloat("_Surface", 1);
-        starMat.SetInt("_ZWrite", 0);
-        starMat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-        starMat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.One);
-        starMat.renderQueue = 2950;
-        renderer.material = starMat;
+        Shader starShader = FindSafeShader("Universal Render Pipeline/Particles/Unlit", "Particles/Standard Unlit", "Universal Render Pipeline/Unlit", "Sprites/Default");
+        if (starShader != null)
+        {
+            Material starMat = new Material(starShader);
+            Texture2D glowTex = LoadParticleTexture("soft_particle_glow");
+            if (starMat.HasProperty("_BaseMap")) starMat.SetTexture("_BaseMap", glowTex);
+            starMat.mainTexture = glowTex;
+            if (starMat.HasProperty("_BaseColor")) starMat.SetColor("_BaseColor", Color.white);
+            starMat.color = Color.white;
+            if (starMat.HasProperty("_Surface")) starMat.SetFloat("_Surface", 1);
+            if (starMat.HasProperty("_ZWrite")) starMat.SetInt("_ZWrite", 0);
+            if (starMat.HasProperty("_SrcBlend")) starMat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            if (starMat.HasProperty("_DstBlend")) starMat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.One);
+            starMat.renderQueue = 2950;
+            renderer.material = starMat;
+        }
         renderer.renderMode = ParticleSystemRenderMode.Billboard;
     }
 
@@ -221,18 +233,21 @@ public class AdvancedSkyboxSystem : MonoBehaviour
 
         Destroy(moonObject.GetComponent<Collider>());
 
-        Material moonMat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
-        if (moonMat.shader == null) moonMat = new Material(Shader.Find("Unlit/Texture"));
-
-        Texture2D moonTex = Resources.Load<Texture2D>("Textures/moon_surface_albedo");
-        if (moonTex != null)
+        Shader moonShader = FindSafeShader("Universal Render Pipeline/Unlit", "Unlit/Texture", "Universal Render Pipeline/Lit", "Sprites/Default");
+        if (moonShader != null)
         {
-            moonMat.SetTexture("_BaseMap", moonTex);
-            moonMat.mainTexture = moonTex;
+            Material moonMat = new Material(moonShader);
+
+            Texture2D moonTex = Resources.Load<Texture2D>("Textures/moon_surface_albedo");
+            if (moonTex != null)
+            {
+                if (moonMat.HasProperty("_BaseMap")) moonMat.SetTexture("_BaseMap", moonTex);
+                moonMat.mainTexture = moonTex;
+            }
+            if (moonMat.HasProperty("_BaseColor")) moonMat.SetColor("_BaseColor", new Color(0.95f, 0.96f, 1f));
+            moonMat.color = new Color(0.95f, 0.96f, 1f); // Branco luar com crateras
+            moonObject.GetComponent<Renderer>().material = moonMat;
         }
-        moonMat.SetColor("_BaseColor", new Color(0.95f, 0.96f, 1f));
-        moonMat.color = new Color(0.95f, 0.96f, 1f); // Branco luar com crateras
-        moonObject.GetComponent<Renderer>().material = moonMat;
 
         // Moon Light
         Light moonLight = moonObject.AddComponent<Light>();

@@ -486,7 +486,7 @@ public class FragaSceneSetup : EditorWindow
         dsRect.anchoredPosition = new Vector2(0, 35);
         dsRect.sizeDelta = new Vector2(580, 45);
         UnityEngine.UI.Text dsText = deathSub.AddComponent<UnityEngine.UI.Text>();
-        dsText.text = "A escuridao consumiu tuas forcas vitais.\nA luz da alvorada e a tua unica esperanca.";
+        dsText.text = "A escuridao consumiu suas forcas vitais.\nA luz do amanhecer e a sua unica esperanca.";
         dsText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
         dsText.fontSize = 17;
         dsText.alignment = TextAnchor.MiddleCenter;
@@ -508,7 +508,7 @@ public class FragaSceneSetup : EditorWindow
             if (gm != null) gm.RevivePlayer();
             if (uiManager != null) uiManager.HideDeathScreen();
         });
-        CreateButtonLabel(reviveBtnObj.transform, "RENASCER NA ALVORADA", 16);
+        CreateButtonLabel(reviveBtnObj.transform, "RENASCER AO AMANHECER", 16);
 
         GameObject menuBtnObj = new GameObject("Btn_Death_Menu");
         menuBtnObj.transform.SetParent(deathModal.transform, false);
@@ -1029,14 +1029,25 @@ public class FragaSceneSetup : EditorWindow
         // --- SETTINGS PANEL ---
         GameObject settingsPanel = new GameObject("Settings_Panel");
         settingsPanel.transform.SetParent(menuCanvasObj.transform);
+        RectTransform setRT = settingsPanel.AddComponent<RectTransform>();
+        setRT.anchorMin = Vector2.zero; setRT.anchorMax = Vector2.one;
+        setRT.offsetMin = Vector2.zero; setRT.offsetMax = Vector2.zero;
         
         GameObject sliderObj = new GameObject("Volume_Slider");
         sliderObj.transform.SetParent(settingsPanel.transform);
         UnityEngine.UI.Slider volSlider = sliderObj.AddComponent<UnityEngine.UI.Slider>();
+        RectTransform volRT = sliderObj.GetComponent<RectTransform>();
+        volRT.anchoredPosition = new Vector2(0, 40);
+        volRT.sizeDelta = new Vector2(360, 28);
 
         GameObject backSetBtnObj = new GameObject("Btn_Back");
         backSetBtnObj.transform.SetParent(settingsPanel.transform);
         UnityEngine.UI.Button backSetBtn = backSetBtnObj.AddComponent<UnityEngine.UI.Button>();
+        backSetBtnObj.AddComponent<UnityEngine.UI.Image>().color = new Color(0.2f, 0.2f, 0.2f, 0.8f);
+        RectTransform backSetRT = backSetBtnObj.GetComponent<RectTransform>();
+        backSetRT.anchoredPosition = new Vector2(0, -100);
+        backSetRT.sizeDelta = new Vector2(200, 40);
+        CreateButtonLabel(backSetBtnObj.transform, "VOLTAR", 14);
 
         // Ligar ao MainMenuManager
         MainMenuManager mmm = menuCanvasObj.AddComponent<MainMenuManager>();
@@ -1062,6 +1073,7 @@ public class FragaSceneSetup : EditorWindow
         
         mmm.masterVolumeSlider = volSlider;
         mmm.btnBackFromSettings = backSetBtn;
+        mmm.EnsureProfessionalMenuUI();
 
         // 22. LootManager (GPU Instancing para drops no chao)
         LootManager lootManager = orchestrator.AddComponent<LootManager>();

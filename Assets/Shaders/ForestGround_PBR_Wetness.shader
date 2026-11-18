@@ -136,8 +136,14 @@
                 float atten = light.distanceAttenuation * lerp(shadowFloor, 1.0, light.shadowAttenuation);
                 float3 halfDir = normalize(light.direction + viewDir);
                 float NdotH = saturate(dot(normalWS, halfDir));
+            #if defined(SHADER_API_MOBILE)
+                half spec2 = (half)(NdotH * NdotH);
+                half spec4 = spec2 * spec2;
+                float spec = spec4 * spec4 * smoothness * (0.06 + puddleMask * 0.42);
+            #else
                 float specPower = exp2(9.0 * smoothness + 1.0);
-                float spec = pow(NdotH, specPower) * smoothness * (0.06 + puddleMask * 0.42);
+                float spec = pow(max(NdotH, 1e-4), specPower) * smoothness * (0.06 + puddleMask * 0.42);
+            #endif
                 return (albedo * NdotL + spec) * light.color * atten;
             }
 
@@ -148,35 +154,52 @@
                 float3 worldNormal = normalize(input.normalWS);
 
                 // Macro noise breakup in world-space to eliminate visible tiling
+            #if defined(SHADER_API_MOBILE)
+                float macroNoise = ValueNoise2D(input.positionWS.xz * 0.08);
+            #else
                 float macroNoise = ValueNoise2D(input.positionWS.xz * 0.08) * 0.65 + ValueNoise2D(input.positionWS.xz * 0.23) * 0.35;
+            #endif
                 float macroTint = lerp(0.84, 1.16, macroNoise);
 
                 // 1. Slope detection for cliff granite exposure
                 float slope = 1.0 - saturate(dot(worldNormal, float3(0, 1, 0)));
                 float rockWeight = smoothstep(_RockSlopeThreshold - 0.14, _RockSlopeThreshold + 0.10, slope + (macroNoise - 0.5) * 0.08);
 
-                // 2. Soil sampling (planar UVs + subtle far-scale detail)
+                // 2. Soil sampling (planar UVs; PC also blends far-scale detail)
                 half4 soilNear = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.uv);
-                half4 soilFar  = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.uv * 0.27 + 0.37);
                 half3 biomeTint = lerp(half3(1.0, 1.0, 1.0), input.color.rgb * 2.8, 0.55);
+            #if defined(SHADER_API_MOBILE)
+                half4 soilColor = soilNear * _BaseColor * half4(biomeTint * macroTint, 1.0);
+            #else
+                half4 soilFar  = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.uv * 0.27 + 0.37);
                 half4 soilColor = lerp(soilNear, soilFar, 0.32) * _BaseColor * half4(biomeTint * macroTint, 1.0);
+            #endif
 
-                // 3. Triplanar Granite Rock sampling (zero cliff stretching!)
-                float3 triW = pow(abs(worldNormal), 4.0);
-                triW /= max(triW.x + triW.y + triW.z, 1e-4);
+                // 3. Triplanar Granite Rock sampling (dominant-axis 1-tap on Mobile, 3-tap blend on PC)
                 float2 uvX = input.positionWS.zy * _RockTriplanarScale;
                 float2 uvY = input.positionWS.xz * _RockTriplanarScale;
                 float2 uvZ = input.positionWS.xy * _RockTriplanarScale;
 
+            #if defined(SHADER_API_MOBILE)
+                float3 absN = abs(worldNormal);
+                float2 rockUV = (absN.x >= absN.y && absN.x >= absN.z) ? uvX : ((absN.z >= absN.y) ? uvZ : uvY);
+                half3 rockRGB = SAMPLE_TEXTURE2D(_RockMap, sampler_RockMap, rockUV).rgb * lerp(0.76, 0.96, macroNoise);
+            #else
+                float3 triW = pow(abs(worldNormal), 4.0);
+                triW /= max(triW.x + triW.y + triW.z, 1e-4);
                 half3 rockX = SAMPLE_TEXTURE2D(_RockMap, sampler_RockMap, uvX).rgb;
                 half3 rockY = SAMPLE_TEXTURE2D(_RockMap, sampler_RockMap, uvY).rgb;
                 half3 rockZ = SAMPLE_TEXTURE2D(_RockMap, sampler_RockMap, uvZ).rgb;
                 half3 rockRGB = (rockX * triW.x + rockY * triW.y + rockZ * triW.z) * lerp(0.76, 0.96, macroNoise);
+            #endif
 
                 half3 albedo = lerp(soilColor.rgb, rockRGB, rockWeight);
 
-                // 4. Normal mapping (soil + micro-detail + triplanar rock)
+                // 4. Normal mapping
                 half3 soilNormalTS = UnpackNormalScale(SAMPLE_TEXTURE2D(_BumpMap, sampler_BumpMap, input.uv), _BumpScale);
+            #if defined(SHADER_API_MOBILE)
+                half3 rockNormalTS = UnpackNormalScale(SAMPLE_TEXTURE2D(_RockNormalMap, sampler_RockNormalMap, rockUV), 1.45);
+            #else
                 half3 detailNormalTS = UnpackNormalScale(SAMPLE_TEXTURE2D(_DetailNormalMap, sampler_DetailNormalMap, input.uv * _DetailTiling), _DetailNormalScale);
                 soilNormalTS = normalize(float3(soilNormalTS.xy + detailNormalTS.xy, soilNormalTS.z * detailNormalTS.z));
 
@@ -184,6 +207,7 @@
                 half3 rNormY = UnpackNormalScale(SAMPLE_TEXTURE2D(_RockNormalMap, sampler_RockNormalMap, uvY), 1.45);
                 half3 rNormZ = UnpackNormalScale(SAMPLE_TEXTURE2D(_RockNormalMap, sampler_RockNormalMap, uvZ), 1.45);
                 half3 rockNormalTS = normalize(rNormX * triW.x + rNormY * triW.y + rNormZ * triW.z);
+            #endif
 
                 half3 normalTS = lerp(soilNormalTS, rockNormalTS, rockWeight);
 
@@ -191,7 +215,11 @@
                 float wetness = saturate(max(_GlobalRainWetness, _GlobalWetness));
                 float cavity = input.color.a;
                 float flatMask = saturate(1.0 - slope * 3.5);
+            #if defined(SHADER_API_MOBILE)
+                float puddleNoise = macroNoise;
+            #else
                 float puddleNoise = ValueNoise2D(input.positionWS.xz * 0.45);
+            #endif
                 float puddleMask = saturate((cavity * 1.4 + puddleNoise * 0.35 - _PuddleDepthThreshold) * wetness * 2.5) * flatMask;
 
                 normalTS = normalize(lerp(normalTS, float3(0, 0, 1), puddleMask * 0.92));
@@ -229,7 +257,9 @@
                 LIGHT_LOOP_END
                 #endif
 
-                float fresnel = pow(1.0 - saturate(dot(normalWS, viewDir)), 4.0);
+                half fInv = 1.0 - saturate(dot(normalWS, viewDir));
+                half f2 = fInv * fInv;
+                float fresnel = f2 * f2;
                 half3 ambient = max(SampleSH(normalWS) * 1.25, half3(0.18, 0.21, 0.24));
                 half3 puddleSkyReflection = ambient * fresnel * (wetness * 0.25 + puddleMask * 0.85);
 

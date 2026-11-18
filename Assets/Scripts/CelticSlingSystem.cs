@@ -12,16 +12,21 @@ public class CelticSlingSystem : MonoBehaviour
     public float maxWindupTime = 0.90f;
     public float launchSpeed = 34f;
     public int bluntDamage = 30;
+    public float staminaCost = 8f;
 
     [Header("Dependencies")]
     public Camera playerCamera;
     public InventoryAdvanced inventory;
+    public PlayerStatus playerStatus;
 
     private bool isWindingUp = false;
     private float windupTimer = 0f;
     private AudioSource audioSource;
     private AudioClip windupClip;
     private AudioClip releaseClip;
+
+    public bool IsWindingUp => isWindingUp;
+    public float Windup01 => maxWindupTime > 0.01f ? Mathf.Clamp01(windupTimer / maxWindupTime) : 0f;
 
     private void Awake()
     {
@@ -32,7 +37,8 @@ public class CelticSlingSystem : MonoBehaviour
     private void Start()
     {
         if (playerCamera == null) playerCamera = Camera.main;
-        if (inventory == null) inventory = FindAnyObjectByType<InventoryAdvanced>();
+        if (inventory == null) inventory = InventoryAdvanced.Instance ?? FindAnyObjectByType<InventoryAdvanced>();
+        if (playerStatus == null) playerStatus = PlayerStatus.Instance ?? FindAnyObjectByType<PlayerStatus>();
     }
 
     private void SetupAudio()
@@ -47,6 +53,10 @@ public class CelticSlingSystem : MonoBehaviour
 
     public void StartWindup()
     {
+        if (isWindingUp) return;
+        if (inventory == null) inventory = InventoryAdvanced.Instance;
+        if (playerStatus == null) playerStatus = PlayerStatus.Instance;
+
         if (inventory != null && !inventory.HasItem(101)) // 101 = Pedra
         {
             if (HUDSurvivalOverlay.Instance != null)
@@ -54,8 +64,20 @@ public class CelticSlingSystem : MonoBehaviour
             return;
         }
 
+        if (playerStatus != null && !playerStatus.CanSpendStamina(4f))
+        {
+            if (HUDSurvivalOverlay.Instance != null)
+                HUDSurvivalOverlay.Instance.ShowLootTooltip(playerStatus.isExhausted
+                    ? "<color=#FF8844>Exausto! Aguarde o folego recuperar.</color>"
+                    : "Sem folego para girar a funda!");
+            return;
+        }
+
         isWindingUp = true;
         windupTimer = 0f;
+
+        if (FirstPersonViewmodelController.Instance != null)
+            FirstPersonViewmodelController.Instance.SetSlingWindup(true, 0.05f);
 
         if (audioSource != null && windupClip != null)
         {
@@ -64,6 +86,23 @@ public class CelticSlingSystem : MonoBehaviour
             audioSource.pitch = 0.85f;
             audioSource.Play();
         }
+    }
+
+    public void CancelWindup()
+    {
+        if (!isWindingUp) return;
+        isWindingUp = false;
+        windupTimer = 0f;
+
+        if (audioSource != null && audioSource.isPlaying)
+        {
+            audioSource.Stop();
+            audioSource.loop = false;
+            audioSource.pitch = 1.0f;
+        }
+
+        if (FirstPersonViewmodelController.Instance != null)
+            FirstPersonViewmodelController.Instance.SetSlingWindup(false, 0f);
     }
 
     private void Update()
@@ -75,12 +114,16 @@ public class CelticSlingSystem : MonoBehaviour
             {
                 audioSource.pitch = Mathf.Lerp(0.85f, 1.45f, windupTimer / maxWindupTime);
             }
+            if (FirstPersonViewmodelController.Instance != null)
+            {
+                FirstPersonViewmodelController.Instance.SetSlingWindup(true, Windup01);
+            }
         }
     }
 
-    public void ReleaseSling()
+    public bool ReleaseSling()
     {
-        if (!isWindingUp) return;
+        if (!isWindingUp) return false;
         isWindingUp = false;
 
         if (audioSource != null)
@@ -88,17 +131,36 @@ public class CelticSlingSystem : MonoBehaviour
             audioSource.Stop();
             audioSource.loop = false;
             audioSource.pitch = 1.0f;
-            if (releaseClip != null) audioSource.PlayOneShot(releaseClip, 0.9f);
         }
 
-        if (windupTimer < 0.25f) return; // Cancelado
+        if (FirstPersonViewmodelController.Instance != null)
+            FirstPersonViewmodelController.Instance.SetSlingWindup(false, 0f);
 
-        if (inventory != null)
+        if (windupTimer < 0.22f) return false; // Cancelado
+
+        if (inventory == null) inventory = InventoryAdvanced.Instance;
+        if (inventory != null && !inventory.RemoveItem(101, 1)) return false;
+
+        if (playerStatus == null) playerStatus = PlayerStatus.Instance;
+        if (playerStatus != null)
         {
-            inventory.RemoveItem(101, 1); // Consome 1 pedra
+            playerStatus.stamina = Mathf.Max(0f, playerStatus.stamina - staminaCost);
+            if (playerStatus.stamina <= 0.5f) playerStatus.isExhausted = true;
+        }
+
+        if (audioSource != null && releaseClip != null)
+        {
+            audioSource.PlayOneShot(releaseClip, 0.9f);
+        }
+
+        if (FragaStealthSystem.Instance != null)
+        {
+            FragaStealthSystem.Instance.EmitNoisePulse(0.22f);
         }
 
         if (playerCamera == null) playerCamera = Camera.main;
+        if (playerCamera == null) return false;
+
         Vector3 forward = playerCamera.transform.forward;
         Vector3 spawnPos = playerCamera.transform.position + forward * 0.6f;
 
@@ -118,14 +180,22 @@ public class CelticSlingSystem : MonoBehaviour
         float speed = Mathf.Lerp(16f, launchSpeed, chargeRatio);
         rb.linearVelocity = forward * speed;
 
+        bool isStealthCrit = FragaStealthSystem.Instance != null && FragaStealthSystem.Instance.IsHidden;
         SlingStoneProjectile proj = stoneObj.AddComponent<SlingStoneProjectile>();
-        proj.damage = Mathf.RoundToInt(bluntDamage * Mathf.Lerp(0.6f, 1.25f, chargeRatio));
+        proj.damage = Mathf.RoundToInt(bluntDamage * Mathf.Lerp(0.6f, 1.25f, chargeRatio) * (isStealthCrit ? 1.65f : 1f));
         proj.shooterRoot = transform;
+
+        if (FirstPersonViewmodelController.Instance != null)
+        {
+            FirstPersonViewmodelController.Instance.TriggerPrimaryAttack(0, chargeRatio >= 0.75f);
+        }
 
         if (FirstPersonCamera.Instance != null)
         {
             FirstPersonCamera.Instance.AddShake(0.04f * chargeRatio);
         }
+
+        return true;
     }
 
     // =================== SINTESE PROCEDURAL DE AUDIO ===================
@@ -208,6 +278,17 @@ public class SlingStoneProjectile : MonoBehaviour
             if (HUDSurvivalOverlay.Instance != null) HUDSurvivalOverlay.Instance.TriggerHitMarker(false, fKilled);
             rb.linearVelocity *= 0.25f;
             Destroy(gameObject, 5f);
+            return;
+        }
+
+        if (BossSystem.Instance != null && BossSystem.Instance.IsActive &&
+            BossSystem.Instance.TryDamageInRay(sweepRay, stepDist, 0.95f, (float)damage, out Vector3 bHit, out bool bKilled))
+        {
+            hasCollided = true;
+            if (VFXPoolManager.Instance != null) VFXPoolManager.Instance.PlayShadowHitVFX(bHit);
+            if (HUDSurvivalOverlay.Instance != null) HUDSurvivalOverlay.Instance.TriggerHitMarker(false, bKilled);
+            rb.linearVelocity *= 0.25f;
+            Destroy(gameObject, 5f);
         }
     }
 
@@ -227,16 +308,23 @@ public class SlingStoneProjectile : MonoBehaviour
         bool hitShadow = VultoManager.Instance != null && VultoManager.Instance.TryDamageVultoAt(point, damage);
         bool faunaKilled = false;
         bool hitFauna = !hitShadow && FaunaManager.Instance != null && FaunaManager.Instance.TryDamageFaunaAt(point, damage, out faunaKilled);
+        BossSystem boss = collision.collider != null ? collision.collider.GetComponentInParent<BossSystem>() : null;
+        bool hitBoss = boss != null && boss.IsActive;
 
-        if (collision.collider != null)
+        if (hitBoss)
         {
-            collision.collider.SendMessageUpwards("TakeDamage", damage, SendMessageOptions.DontRequireReceiver);
+            boss.TakeDamage((float)damage);
+            hitShadow = true;
+        }
+        else if (collision.collider != null)
+        {
+            collision.collider.SendMessageUpwards("TakeDamage", (float)damage, SendMessageOptions.DontRequireReceiver);
         }
 
-        if (hitShadow || hitFauna)
+        if (hitShadow || hitBoss || hitFauna || (collision.collider != null && collision.collider.GetComponentInParent<WildlifeAIEngine>() != null))
         {
             if (HUDSurvivalOverlay.Instance != null)
-                HUDSurvivalOverlay.Instance.TriggerHitMarker(false, faunaKilled);
+                HUDSurvivalOverlay.Instance.TriggerHitMarker(false, faunaKilled || (hitBoss && !boss.IsActive));
         }
 
         if (VFXPoolManager.Instance != null)

@@ -65,13 +65,18 @@ public class SanitySystem : MonoBehaviour
 
     public void ToggleLamp()
     {
+        SetLampState(!isLampOn);
+    }
+
+    public void SetLampState(bool on)
+    {
         if (oil <= minOilThresholdForLight)
         {
             isLampOn = false;
         }
         else
         {
-            isLampOn = !isLampOn;
+            isLampOn = on;
         }
 
         if (lampLight != null)
@@ -105,7 +110,8 @@ public class SanitySystem : MonoBehaviour
 
         bool isDaytime = (dayNightCycle != null) ? (dayNightCycle.currentTime >= 6f && dayNightCycle.currentTime < 19.5f) : true;
         bool hasOffHandLight = inventoryCache != null && (inventoryCache.equippedOffHandId == 303 || inventoryCache.equippedOffHandId == 304);
-        bool hasLantern = (lampLight != null && lampLight.enabled && isLampOn && oil > minOilThresholdForLight) || hasOffHandLight;
+        bool playerLighterActive = PlayerController.Instance != null && PlayerController.Instance.IsLighterOn;
+        bool hasLantern = ((lampLight != null ? lampLight.enabled : playerLighterActive) && isLampOn && oil > minOilThresholdForLight) || hasOffHandLight;
         bool isInLight = isDaytime || hasLantern || isNearBonfire;
 
         if (isInLight)
@@ -142,7 +148,10 @@ public class SanitySystem : MonoBehaviour
 
     private void UpdateOil()
     {
-        if (lampLight != null && lampLight.enabled && isLampOn && oil > 0f)
+        bool playerLighterActive = PlayerController.Instance != null && PlayerController.Instance.IsLighterOn;
+        bool lightConsumingOil = (lampLight != null ? lampLight.enabled : playerLighterActive) && isLampOn && oil > 0f;
+
+        if (lightConsumingOil)
         {
             oil -= oilDepletionRate * Time.deltaTime;
             oil = Mathf.Clamp(oil, 0f, 100f);
@@ -158,14 +167,14 @@ public class SanitySystem : MonoBehaviour
 
     private void UpdateLight()
     {
-        if (lampLight == null) return;
-
         if (oil < minOilThresholdForLight)
         {
             isLampOn = false;
-            lampLight.enabled = false;
+            if (lampLight != null) lampLight.enabled = false;
             return;
         }
+
+        if (lampLight == null) return;
 
         lampLight.enabled = isLampOn;
         float oilNormalized = oil / 100f;
@@ -235,6 +244,10 @@ public class SanitySystem : MonoBehaviour
         if (lampLight != null && lampLight.enabled && isLampOn)
         {
             radius = lampLight.range;
+        }
+        else if (PlayerController.Instance != null && PlayerController.Instance.IsLighterOn && isLampOn && oil > minOilThresholdForLight)
+        {
+            radius = 12f;
         }
         if (inventoryCache != null && (inventoryCache.equippedOffHandId == 303 || inventoryCache.equippedOffHandId == 304))
         {

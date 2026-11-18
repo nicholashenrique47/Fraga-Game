@@ -4,7 +4,8 @@ using UnityEngine.SceneManagement;
 
 /// <summary>
 /// FragaOptionsMenu: Modal de Pausa e Opcoes em Runtime (Mobile + Desktop, Zero-Emoji).
-/// Permite ajustar Volume, Qualidade Grafica, Sensibilidade da Camera, Layout de Controles e Salvar.
+/// Permite ajustar Volume, Qualidade Grafica, Sensibilidade da Camera, Layout de Controles e Salvar,
+/// e posiciona o botao de Opcoes + barra rapida [I] Mochila / [B] Obra / [M] Mapa abaixo do Minimapa.
 /// </summary>
 public class FragaOptionsMenu : MonoBehaviour
 {
@@ -13,6 +14,7 @@ public class FragaOptionsMenu : MonoBehaviour
     public bool IsOpen { get; private set; }
 
     private GameObject hudBtnObj;
+    private GameObject quickActionBarObj;
     private GameObject modalRootObj;
 
     private Text volumeValText;
@@ -21,6 +23,7 @@ public class FragaOptionsMenu : MonoBehaviour
 
     private Image[] qualityBtnBgs = new Image[3];
     private Image[] layoutBtnBgs = new Image[3];
+    private Image[] joystickBtnBgs = new Image[3];
     private Text saveStatusText;
 
     private bool wasOtherModalOrBuildOpen = false;
@@ -38,14 +41,19 @@ public class FragaOptionsMenu : MonoBehaviour
         bool otherModalOpen = SurvivalMapSystem.IsMapOpen ||
                               (SurvivalInventoryCraftUI.Instance != null && SurvivalInventoryCraftUI.Instance.IsOpen) ||
                               (RadialQuickSelectUI.Instance != null && RadialQuickSelectUI.Instance.IsOpen) ||
-                              (BlueprintPlacementManager.Instance != null && BlueprintPlacementManager.Instance.IsPlacingGhost) ||
+                              (BlueprintPlacementManager.Instance != null && (BlueprintPlacementManager.Instance.IsPlacingGhost || BlueprintPlacementManager.Instance.IsBookOpen)) ||
                               (BuildingSystem.Instance != null && BuildingSystem.Instance.IsBuildModeActive) ||
-                              StorageChestInteractable.IsAnyChestOpen;
+                              StorageChestInteractable.IsAnyChestOpen ||
+                              UIManager.IsEndgameModalOpen;
 
-        if (hudBtnObj != null)
+        bool shouldShowHudBtn = !IsOpen && !otherModalOpen;
+        if (hudBtnObj != null && hudBtnObj.activeSelf != shouldShowHudBtn)
         {
-            bool shouldShowHudBtn = !IsOpen && !otherModalOpen;
-            if (hudBtnObj.activeSelf != shouldShowHudBtn) hudBtnObj.SetActive(shouldShowHudBtn);
+            hudBtnObj.SetActive(shouldShowHudBtn);
+        }
+        if (quickActionBarObj != null && quickActionBarObj.activeSelf != shouldShowHudBtn)
+        {
+            quickActionBarObj.SetActive(shouldShowHudBtn);
         }
 
         if (Input.GetKeyDown(KeyCode.F10) || Input.GetKeyDown(KeyCode.O))
@@ -125,24 +133,24 @@ public class FragaOptionsMenu : MonoBehaviour
 
     private void BuildUI()
     {
-        Canvas canvas = GetComponentInParent<Canvas>() ?? FindAnyObjectByType<Canvas>();
+        Canvas canvas = HUDSurvivalOverlay.GetGameplayCanvas();
         Transform parent = canvas != null ? canvas.transform : transform;
         Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
 
-        // 1. Botao discreto no canto superior direito abaixo do relogio (PC + Mobile)
+        // 1. Botao discreto no canto superior direito ABAIXO do Minimapa (PC + Mobile)
         hudBtnObj = new GameObject("Btn_HUD_Options");
         hudBtnObj.transform.SetParent(parent, false);
         RectTransform btnRT = hudBtnObj.AddComponent<RectTransform>();
         btnRT.anchorMin = new Vector2(1f, 1f);
         btnRT.anchorMax = new Vector2(1f, 1f);
         btnRT.pivot = new Vector2(1f, 1f);
-        btnRT.anchoredPosition = new Vector2(-25f, -68f);
-        btnRT.sizeDelta = new Vector2(124f, 30f);
+        btnRT.anchoredPosition = new Vector2(-20f, -258f);
+        btnRT.sizeDelta = new Vector2(244f, 30f);
 
         Image btnBg = hudBtnObj.AddComponent<Image>();
         btnBg.sprite = FragaProIconLibrary.GetPillSprite();
         btnBg.type = Image.Type.Sliced;
-        btnBg.color = new Color(0.06f, 0.09f, 0.13f, 0.82f);
+        btnBg.color = new Color(0.06f, 0.09f, 0.13f, 0.86f);
 
         Outline btnOut = hudBtnObj.AddComponent<Outline>();
         btnOut.effectColor = new Color(0.38f, 0.72f, 0.90f, 0.50f);
@@ -156,7 +164,7 @@ public class FragaOptionsMenu : MonoBehaviour
         icoRT.anchorMin = new Vector2(0f, 0.5f);
         icoRT.anchorMax = new Vector2(0f, 0.5f);
         icoRT.pivot = new Vector2(0f, 0.5f);
-        icoRT.anchoredPosition = new Vector2(9f, 0f);
+        icoRT.anchoredPosition = new Vector2(10f, 0f);
         icoRT.sizeDelta = new Vector2(16f, 16f);
         Image icoImg = icoObj.AddComponent<Image>();
         icoImg.sprite = FragaProIconLibrary.GetControlIcon(FragaProIconLibrary.ControlIcon.PauseMenu);
@@ -168,7 +176,7 @@ public class FragaOptionsMenu : MonoBehaviour
         RectTransform lblRT = lblObj.AddComponent<RectTransform>();
         lblRT.anchorMin = Vector2.zero;
         lblRT.anchorMax = Vector2.one;
-        lblRT.offsetMin = new Vector2(28f, 0f);
+        lblRT.offsetMin = new Vector2(30f, 0f);
         lblRT.offsetMax = new Vector2(-6f, 0f);
         Text lblTxt = lblObj.AddComponent<Text>();
         lblTxt.font = font;
@@ -178,6 +186,41 @@ public class FragaOptionsMenu : MonoBehaviour
         lblTxt.color = new Color(0.90f, 0.95f, 1f, 0.95f);
         lblTxt.text = "OPCOES [F10]";
         lblTxt.raycastTarget = false;
+
+        // 1.5 Barra rapida clicavel logo abaixo de Opcoes: [I] MOCH, [K] STAT, [B] OBRA, [M] MAPA
+        quickActionBarObj = new GameObject("HUD_QuickActionBar");
+        quickActionBarObj.transform.SetParent(parent, false);
+        RectTransform qRT = quickActionBarObj.AddComponent<RectTransform>();
+        qRT.anchorMin = new Vector2(1f, 1f);
+        qRT.anchorMax = new Vector2(1f, 1f);
+        qRT.pivot = new Vector2(1f, 1f);
+        qRT.anchoredPosition = new Vector2(-20f, -294f);
+        qRT.sizeDelta = new Vector2(244f, 28f);
+
+        CreateQuickHUDButton(quickActionBarObj.transform, font, "Btn_QuickBag", "MOCH [I]", new Vector2(-93f, 0f), 58f,
+            new Color(0.11f, 0.24f, 0.34f, 0.88f), () =>
+            {
+                if (SurvivalInventoryCraftUI.Instance != null)
+                    SurvivalInventoryCraftUI.Instance.ToggleMenu();
+            });
+        CreateQuickHUDButton(quickActionBarObj.transform, font, "Btn_QuickStatus", "STAT [K]", new Vector2(-31f, 0f), 58f,
+            new Color(0.26f, 0.16f, 0.36f, 0.88f), () =>
+            {
+                if (SurvivalInventoryCraftUI.Instance != null)
+                    SurvivalInventoryCraftUI.Instance.OpenCharacterStatusTab();
+            });
+        CreateQuickHUDButton(quickActionBarObj.transform, font, "Btn_QuickBuild", "OBRA [B]", new Vector2(31f, 0f), 58f,
+            new Color(0.14f, 0.32f, 0.22f, 0.88f), () =>
+            {
+                if (BlueprintPlacementManager.Instance != null)
+                    BlueprintPlacementManager.Instance.ToggleBuildMenuOrPlacement();
+            });
+        CreateQuickHUDButton(quickActionBarObj.transform, font, "Btn_QuickMap", "MAPA [M]", new Vector2(93f, 0f), 58f,
+            new Color(0.24f, 0.20f, 0.12f, 0.88f), () =>
+            {
+                if (SurvivalMapSystem.Instance != null)
+                    SurvivalMapSystem.Instance.ToggleMap();
+            });
 
         // 2. Overlay Modal de Opcoes & Pausa
         modalRootObj = new GameObject("FragaOptionsModal");
@@ -198,7 +241,7 @@ public class FragaOptionsMenu : MonoBehaviour
         cardRT.anchorMin = new Vector2(0.5f, 0.5f);
         cardRT.anchorMax = new Vector2(0.5f, 0.5f);
         cardRT.pivot = new Vector2(0.5f, 0.5f);
-        cardRT.sizeDelta = new Vector2(540f, 470f);
+        cardRT.sizeDelta = new Vector2(540f, 520f);
 
         Image cardBg = card.AddComponent<Image>();
         cardBg.color = new Color(0.06f, 0.09f, 0.13f, 0.96f);
@@ -206,16 +249,16 @@ public class FragaOptionsMenu : MonoBehaviour
         cardOut.effectColor = new Color(0.35f, 0.80f, 0.95f, 0.65f);
         cardOut.effectDistance = new Vector2(1.5f, -1.5f);
 
-        CreateHeaderText(card.transform, font, "PAUSA & OPCOES", new Vector2(0f, 198f), 22, new Color(0.92f, 0.96f, 1f));
+        CreateHeaderText(card.transform, font, "PAUSA & OPCOES", new Vector2(0f, 224f), 22, new Color(0.92f, 0.96f, 1f));
 
         // Linha 1: Volume
-        CreateLabelText(card.transform, font, "VOLUME GERAL", new Vector2(-140f, 138f));
-        CreateStepButton(card.transform, font, "-", new Vector2(20f, 138f), () => AdjustVolume(-0.1f));
+        CreateLabelText(card.transform, font, "VOLUME GERAL", new Vector2(-140f, 166f));
+        CreateStepButton(card.transform, font, "-", new Vector2(20f, 166f), () => AdjustVolume(-0.1f));
 
         GameObject volBarBg = new GameObject("VolBar");
         volBarBg.transform.SetParent(card.transform, false);
         RectTransform vbRT = volBarBg.AddComponent<RectTransform>();
-        vbRT.anchoredPosition = new Vector2(105f, 138f);
+        vbRT.anchoredPosition = new Vector2(105f, 166f);
         vbRT.sizeDelta = new Vector2(115f, 16f);
         volBarBg.AddComponent<Image>().color = new Color(0.15f, 0.18f, 0.24f, 1f);
 
@@ -227,42 +270,89 @@ public class FragaOptionsMenu : MonoBehaviour
         vfRT.offsetMin = Vector2.zero;
         vfRT.offsetMax = Vector2.zero;
         volumeFillImg = volFill.AddComponent<Image>();
+        volumeFillImg.sprite = FragaProIconLibrary.GetBarFillSprite();
         volumeFillImg.type = Image.Type.Filled;
         volumeFillImg.fillMethod = Image.FillMethod.Horizontal;
         volumeFillImg.color = new Color(0.35f, 0.85f, 0.95f, 1f);
 
-        CreateStepButton(card.transform, font, "+", new Vector2(188f, 138f), () => AdjustVolume(0.1f));
-        volumeValText = CreateValueText(card.transform, font, "100%", new Vector2(232f, 138f));
+        CreateStepButton(card.transform, font, "+", new Vector2(188f, 166f), () => AdjustVolume(0.1f));
+        volumeValText = CreateValueText(card.transform, font, "100%", new Vector2(232f, 166f));
 
         // Linha 2: Qualidade Grafica
-        CreateLabelText(card.transform, font, "QUALIDADE", new Vector2(-140f, 82f));
-        qualityBtnBgs[0] = CreateChoiceButton(card.transform, font, "BAIXO", new Vector2(36f, 82f), 84f, () => SetQuality(0));
-        qualityBtnBgs[1] = CreateChoiceButton(card.transform, font, "MEDIO", new Vector2(126f, 82f), 84f, () => SetQuality(1));
-        qualityBtnBgs[2] = CreateChoiceButton(card.transform, font, "ALTO", new Vector2(216f, 82f), 84f, () => SetQuality(2));
+        CreateLabelText(card.transform, font, "QUALIDADE", new Vector2(-140f, 114f));
+        qualityBtnBgs[0] = CreateChoiceButton(card.transform, font, "BAIXO", new Vector2(36f, 114f), 84f, () => SetQuality(0));
+        qualityBtnBgs[1] = CreateChoiceButton(card.transform, font, "MEDIO", new Vector2(126f, 114f), 84f, () => SetQuality(1));
+        qualityBtnBgs[2] = CreateChoiceButton(card.transform, font, "ALTO", new Vector2(216f, 114f), 84f, () => SetQuality(2));
 
         // Linha 3: Sensibilidade
-        CreateLabelText(card.transform, font, "SENSIBILIDADE", new Vector2(-140f, 26f));
-        CreateStepButton(card.transform, font, "-", new Vector2(20f, 26f), () => AdjustSensitivity(-0.25f));
-        sensValText = CreateValueText(card.transform, font, "1.6x", new Vector2(105f, 26f));
-        CreateStepButton(card.transform, font, "+", new Vector2(188f, 26f), () => AdjustSensitivity(0.25f));
+        CreateLabelText(card.transform, font, "SENSIBILIDADE", new Vector2(-140f, 62f));
+        CreateStepButton(card.transform, font, "-", new Vector2(20f, 62f), () => AdjustSensitivity(-0.25f));
+        sensValText = CreateValueText(card.transform, font, "1.6x", new Vector2(105f, 62f));
+        CreateStepButton(card.transform, font, "+", new Vector2(188f, 62f), () => AdjustSensitivity(0.25f));
 
         // Linha 4: Controles
-        CreateLabelText(card.transform, font, "CONTROLES", new Vector2(-140f, -30f));
-        layoutBtnBgs[0] = CreateChoiceButton(card.transform, font, "AUTO", new Vector2(36f, -30f), 84f, () => SetControlLayout(0));
-        layoutBtnBgs[1] = CreateChoiceButton(card.transform, font, "MOBILE", new Vector2(126f, -30f), 84f, () => SetControlLayout(1));
-        layoutBtnBgs[2] = CreateChoiceButton(card.transform, font, "PC", new Vector2(216f, -30f), 84f, () => SetControlLayout(2));
+        CreateLabelText(card.transform, font, "CONTROLES", new Vector2(-140f, 10f));
+        layoutBtnBgs[0] = CreateChoiceButton(card.transform, font, "AUTO", new Vector2(36f, 10f), 84f, () => SetControlLayout(0));
+        layoutBtnBgs[1] = CreateChoiceButton(card.transform, font, "MOBILE", new Vector2(126f, 10f), 84f, () => SetControlLayout(1));
+        layoutBtnBgs[2] = CreateChoiceButton(card.transform, font, "PC", new Vector2(216f, 10f), 84f, () => SetControlLayout(2));
+
+        // Linha 5: Modo do Joystick Mobile
+        CreateLabelText(card.transform, font, "JOYSTICK MOBILE", new Vector2(-140f, -42f));
+        joystickBtnBgs[0] = CreateChoiceButton(card.transform, font, "FLUTUANTE", new Vector2(36f, -42f), 84f, () => SetJoystickMode(0));
+        joystickBtnBgs[1] = CreateChoiceButton(card.transform, font, "FIXO", new Vector2(126f, -42f), 84f, () => SetJoystickMode(1));
+        joystickBtnBgs[2] = CreateChoiceButton(card.transform, font, "CENTRAL", new Vector2(216f, -42f), 84f, () => SetJoystickMode(2));
 
         // Botoes de acao
-        CreateActionButton(card.transform, font, "SALVAR PROGRESSO", new Vector2(0f, -96f), new Vector2(360f, 40f),
+        CreateActionButton(card.transform, font, "SALVAR PROGRESSO", new Vector2(0f, -110f), new Vector2(360f, 40f),
             new Color(0.16f, 0.34f, 0.24f, 1f), OnSaveClicked);
 
-        saveStatusText = CreateHeaderText(card.transform, font, "", new Vector2(0f, -128f), 12, new Color(0.55f, 0.95f, 0.65f));
+        saveStatusText = CreateHeaderText(card.transform, font, "", new Vector2(0f, -146f), 12, new Color(0.55f, 0.95f, 0.65f));
 
-        CreateActionButton(card.transform, font, "RETOMAR JOGO", new Vector2(-95f, -172f), new Vector2(175f, 42f),
+        CreateActionButton(card.transform, font, "CONTINUAR JOGO", new Vector2(-95f, -196f), new Vector2(175f, 42f),
             new Color(0.15f, 0.32f, 0.45f, 1f), Close);
 
-        CreateActionButton(card.transform, font, "MENU PRINCIPAL", new Vector2(95f, -172f), new Vector2(175f, 42f),
+        CreateActionButton(card.transform, font, "MENU PRINCIPAL", new Vector2(95f, -196f), new Vector2(175f, 42f),
             new Color(0.36f, 0.14f, 0.14f, 1f), ReturnToMainMenu);
+    }
+
+    private static void CreateQuickHUDButton(Transform parent, Font font, string name, string label, Vector2 pos, float width,
+        Color bgColor, UnityEngine.Events.UnityAction onClick)
+    {
+        GameObject btnObj = new GameObject(name);
+        btnObj.transform.SetParent(parent, false);
+        RectTransform rt = btnObj.AddComponent<RectTransform>();
+        rt.anchorMin = new Vector2(0.5f, 0.5f);
+        rt.anchorMax = new Vector2(0.5f, 0.5f);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.anchoredPosition = pos;
+        rt.sizeDelta = new Vector2(width, 26f);
+
+        Image bg = btnObj.AddComponent<Image>();
+        bg.sprite = FragaProIconLibrary.GetPillSprite();
+        bg.type = Image.Type.Sliced;
+        bg.color = bgColor;
+
+        Outline outl = btnObj.AddComponent<Outline>();
+        outl.effectColor = new Color(0.45f, 0.78f, 0.95f, 0.38f);
+        outl.effectDistance = new Vector2(1f, -1f);
+
+        btnObj.AddComponent<Button>().onClick.AddListener(onClick);
+
+        GameObject txObj = new GameObject("Txt");
+        txObj.transform.SetParent(btnObj.transform, false);
+        RectTransform trt = txObj.AddComponent<RectTransform>();
+        trt.anchorMin = Vector2.zero;
+        trt.anchorMax = Vector2.one;
+        trt.offsetMin = Vector2.zero;
+        trt.offsetMax = Vector2.zero;
+        Text t = txObj.AddComponent<Text>();
+        t.font = font;
+        t.fontSize = 10;
+        t.fontStyle = FontStyle.Bold;
+        t.alignment = TextAnchor.MiddleCenter;
+        t.color = Color.white;
+        t.text = label;
+        t.raycastTarget = false;
     }
 
     private void AdjustVolume(float delta)
@@ -323,6 +413,21 @@ public class FragaOptionsMenu : MonoBehaviour
         RefreshReadouts();
     }
 
+    private void SetJoystickMode(int mode)
+    {
+        MobileInputController mic = MobileInputController.Instance ?? FindAnyObjectByType<MobileInputController>();
+        if (mic != null)
+        {
+            mic.SetJoystickMode((MobileInputController.JoystickType)Mathf.Clamp(mode, 0, 2));
+        }
+        else
+        {
+            PlayerPrefs.SetInt("Fraga_JoystickMode", Mathf.Clamp(mode, 0, 2));
+            PlayerPrefs.Save();
+        }
+        RefreshReadouts();
+    }
+
     private void OnSaveClicked()
     {
         SaveSystem saveSys = FindAnyObjectByType<SaveSystem>();
@@ -371,6 +476,14 @@ public class FragaOptionsMenu : MonoBehaviour
         for (int i = 0; i < 3; i++)
         {
             if (layoutBtnBgs[i] != null) layoutBtnBgs[i].color = (i == layout) ? activeCol : inactiveCol;
+        }
+
+        int joyMode = MobileInputController.Instance != null
+            ? (int)MobileInputController.Instance.joystickType
+            : PlayerPrefs.GetInt("Fraga_JoystickMode", 0);
+        for (int i = 0; i < 3; i++)
+        {
+            if (joystickBtnBgs[i] != null) joystickBtnBgs[i].color = (i == joyMode) ? activeCol : inactiveCol;
         }
     }
 

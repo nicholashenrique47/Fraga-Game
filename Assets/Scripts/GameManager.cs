@@ -4,76 +4,79 @@ using System.Collections;
 
 public class GameManager : MonoBehaviour
 {
-    // C++ DLL Imports
-    [DllImport("FragaNative", CallingConvention = CallingConvention.Cdecl)]
-    public static extern int InitFragaEngine();
-
-    [DllImport("FragaNative", CallingConvention = CallingConvention.Cdecl)]
-    public static extern void GenerateMapGrid(System.IntPtr mapData, int width, int height, int seed);
-
-    [DllImport("FragaNative", CallingConvention = CallingConvention.Cdecl)]
-    public static extern void CalculateFlowField(System.IntPtr mapData, System.IntPtr vectorX, System.IntPtr vectorY, System.IntPtr intField, System.IntPtr queue, int width, int height, int targetX, int targetY);
-
-    [DllImport("FragaNative", CallingConvention = CallingConvention.Cdecl)]
-    public static extern void UpdateMapCell(System.IntPtr mapData, int width, int height, int x, int y, int newTileID);
-
-    [Header("Map Configuration")]
+    [Header("Map Configurations (Ilha da Fraga 768x768m - 60 FPS Mobile/PC)")]
     public int mapWidth = 768;
     public int mapHeight = 768;
     public int mapSeed = 1913;
-    public float pathfindingUpdateInterval = 0.30f; // Otimização Mobile/PC para mundo 768x768
+    public float pathfindingUpdateInterval = 0.25f; // 4 updates por segundo para 768x768m
 
-    [Header("Player & Entities")]
+    [Header("References")]
     public Transform playerTransform;
-    public GameObject companionPrefab;
-
-    [Header("Sub-Systems")]
+    public VultoManager vultoManager;
+    public MapRenderer mapRenderer;
     public BuildingSystem buildingSystem;
     public ResourceManager resourceManager;
     public EntityEventSystem entityEventSystem;
-    public VultoManager vultoManager;
-    public MapRenderer mapRenderer; // Novo Sub-Sistema
 
-    // Data-Oriented Memory Arrays
+    [Header("Procedural World Entities")]
+    public GameObject companionPrefab;
+
+    // Arrays Geridos no C#
     private int[] mapDataArray;
     private float[] flowFieldXArray;
     private float[] flowFieldYArray;
-    private ushort[] intFieldArray; // Novo: Previne alocacao nativa
-    private int[] queueArray;       // Novo: Previne alocacao nativa
+    private int[] intFieldArray;
+    private int[] queueArray;
 
-    // Pinned Pointers para zero-copy com C++
+    // Handles para fixar (Pin) a memoria e obter Ponteiros Seguros para o C++
     private GCHandle mapDataHandle;
     private GCHandle flowFieldXHandle;
     private GCHandle flowFieldYHandle;
     private GCHandle intFieldHandle;
     private GCHandle queueHandle;
 
-    public System.IntPtr mapDataPtr;
-    private System.IntPtr flowFieldXPtr;
-    private System.IntPtr flowFieldYPtr;
+    [HideInInspector] public System.IntPtr mapDataPtr;
+    [HideInInspector] public System.IntPtr flowFieldXPtr;
+    [HideInInspector] public System.IntPtr flowFieldYPtr;
     private System.IntPtr intFieldPtr;
     private System.IntPtr queuePtr;
 
+    private Coroutine flowFieldCoroutine;
+
+    // Importacoes da Biblioteca Nativa (C++)
+    [DllImport("FragaNative")]
+    private static extern void GenerateForestMap(System.IntPtr outMapData, int width, int height, int seed);
+
+    [DllImport("FragaNative")]
+    private static extern void CalculateFlowField(
+        System.IntPtr mapData, 
+        System.IntPtr outFlowFieldX, 
+        System.IntPtr outFlowFieldY, 
+        System.IntPtr integrationField, 
+        System.IntPtr bfsQueue, 
+        int width, int height, int targetX, int targetY);
+
+    [DllImport("FragaNative")]
+    private static extern void UpdateMapCell(System.IntPtr mapData, int width, int height, int x, int y, int newTileID);
+
     private void Awake()
     {
-        if (mapWidth < 512) mapWidth = FragaWorldBlueprint.DefaultWidth;
-        if (mapHeight < 512) mapHeight = FragaWorldBlueprint.DefaultHeight;
-        pathfindingUpdateInterval = Application.isMobilePlatform ? 0.35f : 0.25f;
+        // Forca upgrade automatico de cenas antigas (< 768) para o novo mundo aberto 768x768m
+        if (mapWidth < FragaWorldBlueprint.DefaultWidth) mapWidth = FragaWorldBlueprint.DefaultWidth;
+        if (mapHeight < FragaWorldBlueprint.DefaultHeight) mapHeight = FragaWorldBlueprint.DefaultHeight;
+
         FragaWorldBlueprint.Initialize(mapSeed, mapWidth, mapHeight);
 
-        // 1. Inicializa a engine C++
-        int engineVersion = InitFragaEngine();
-        Debug.Log($"[FragaNative] Engine Inicializada. Versão/Check: {engineVersion}");
+        int totalCells = mapWidth * mapHeight;
 
-        // 2. Aloca Memória de forma contígua no C#
-        int size = mapWidth * mapHeight;
-        mapDataArray = new int[size];
-        flowFieldXArray = new float[size];
-        flowFieldYArray = new float[size];
-        intFieldArray = new ushort[size];
-        queueArray = new int[size];
+        // 1. Alocar a Memoria no C#
+        mapDataArray = new int[totalCells];
+        flowFieldXArray = new float[totalCells];
+        flowFieldYArray = new float[totalCells];
+        intFieldArray = new int[totalCells];
+        queueArray = new int[totalCells];
 
-        // 3. Fixa (Pin) a memória para garantir segurança nativa
+        // 2. Fixar (Pin) a Memoria para que o Garbage Collector nao a mova
         mapDataHandle = GCHandle.Alloc(mapDataArray, GCHandleType.Pinned);
         flowFieldXHandle = GCHandle.Alloc(flowFieldXArray, GCHandleType.Pinned);
         flowFieldYHandle = GCHandle.Alloc(flowFieldYArray, GCHandleType.Pinned);
@@ -115,6 +118,12 @@ public class GameManager : MonoBehaviour
         }
 
         InitializeSubSystems(preserveWorldState: true);
+
+        if (playerTransform != null)
+        {
+            var pc = playerTransform.GetComponent<PlayerController>();
+            if (pc != null) pc.SnapToGround();
+        }
     }
 
     public void StartNewGame(int seed)
@@ -124,20 +133,43 @@ public class GameManager : MonoBehaviour
         FragaWorldBlueprint.StampNativeMapGrid(mapDataPtr, mapWidth, mapHeight);
         Debug.Log($"[GameManager] Novo Mundo Aberto {mapWidth}x{mapHeight} gerado com a Seed: {mapSeed}");
 
+        StorageChestInteractable.CloseModal();
+        if (LogCarryingSystem.Instance != null)
+        {
+            LogCarryingSystem.Instance.ClearCarriedLogs();
+        }
+        BlueprintPlacementManager bpMgr = BlueprintPlacementManager.Instance
+            ?? FindAnyObjectByType<BlueprintPlacementManager>(FindObjectsInactive.Include);
+        if (bpMgr != null)
+        {
+            bpMgr.ClearAllPlacedStructures();
+        }
+
         if (mapRenderer != null)
         {
             mapRenderer.ResetWorldState();
         }
 
+        InventoryAdvanced inv = InventoryAdvanced.Instance ?? FindAnyObjectByType<InventoryAdvanced>();
+        if (inv != null)
+        {
+            inv.ResetToStartingKit();
+        }
+
+        TutorialManager tut = FindAnyObjectByType<TutorialManager>();
+        if (tut != null)
+        {
+            tut.SetStep(0);
+        }
+
         Vector2 camp = FragaWorldBlueprint.CrashCampPos;
         if (playerTransform != null)
         {
-            float spawnY = TerrainMeshGenerator.GetTerrainHeight(camp.x, camp.y) + 1.0f;
+            float spawnY = TerrainMeshGenerator.GetTerrainHeight(camp.x, camp.y) + 0.35f;
             playerTransform.position = new Vector3(camp.x, spawnY, camp.y);
-            var pc = playerTransform.GetComponent<PlayerController>();
-            if (pc != null) pc.SnapToGround();
+            playerTransform.rotation = Quaternion.Euler(0f, 15f, 0f);
         }
-        
+
         // Spawn de um companheiro proceduralmente perto das ruinas
         if (companionPrefab != null)
         {
@@ -146,10 +178,16 @@ public class GameManager : MonoBehaviour
             float compY = TerrainMeshGenerator.GetTerrainHeight(compX, compZ) + 1.0f;
             Vector3 companionPos = new Vector3(compX, compY, compZ);
             Instantiate(companionPrefab, companionPos, Quaternion.identity);
-            Debug.Log("[GameManager] Companheiro spawnado nas ruínas.");
+            Debug.Log("[GameManager] Companheiro spawnado nas ruinas.");
         }
 
         InitializeSubSystems(preserveWorldState: false);
+
+        if (playerTransform != null)
+        {
+            var pc = playerTransform.GetComponent<PlayerController>();
+            if (pc != null) pc.SnapToGround();
+        }
     }
 
     public int[] GetMapData()
@@ -208,11 +246,14 @@ public class GameManager : MonoBehaviour
             tut.uiManager = FindAnyObjectByType<UIManager>();
         }
 
-        // FASE 2: Aplicação da Metaprocessão
+        FragaCoopSession.GetOrCreate();
+
+        // FASE 2: Aplicacao da Metaprogressao
         ApplyMetaUpgrades();
 
         // Inicia ciclo de Flow Field (Pathfinding)
-        StartCoroutine(UpdateFlowFieldRoutine());
+        if (flowFieldCoroutine != null) StopCoroutine(flowFieldCoroutine);
+        flowFieldCoroutine = StartCoroutine(UpdateFlowFieldRoutine());
     }
 
     private void ApplyMetaUpgrades()
@@ -221,11 +262,11 @@ public class GameManager : MonoBehaviour
 
         if (playerTransform != null)
         {
-            // Bónus de Velocidade
+            // Bonus de Velocidade
             PlayerController pc = playerTransform.GetComponent<PlayerController>();
             if (pc != null) pc.speed += (meta.upgradeSpeedLevel * 0.3f);
 
-            // Bónus de Lampião e Sanidade
+            // Bonus de Lampiao e Sanidade
             SanitySystem sanity = playerTransform.GetComponent<SanitySystem>();
             if (sanity != null)
             {
@@ -240,7 +281,7 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    // Optimização Mobile: Coroutine para desfasar cálculo pesado da main thread / loop de renderização
+    // Optimizacao Mobile: Coroutine para desfasar calculo pesado da main thread / loop de renderizacao
     private IEnumerator UpdateFlowFieldRoutine()
     {
         yield return null;
@@ -279,8 +320,8 @@ public class GameManager : MonoBehaviour
         if (isGameOver) return;
         isGameOver = true;
         
-        Time.timeScale = 0f; // Pausa a simulação
-        Debug.Log("[GameManager] GAME OVER Ativado! À espera de decisão do jogador.");
+        Time.timeScale = 0f; // Pausa a simulacao
+        Debug.Log("[GameManager] GAME OVER Ativado! A espera de decisao do jogador.");
         
         UIManager uiManager = FindAnyObjectByType<UIManager>();
         if (uiManager != null)
@@ -322,7 +363,7 @@ public class GameManager : MonoBehaviour
             vultoManager.ClearNearbyVultos(playerTransform.position, 40f);
         }
 
-        // Resetar efeitos cinematográficos de morte
+        // Resetar efeitos cinematograficos de morte
         PostProcessingManager ppManager = FindAnyObjectByType<PostProcessingManager>();
         if (ppManager != null) ppManager.ResetAllEffects();
 

@@ -37,17 +37,32 @@ public class VFXPoolManager : MonoBehaviour
         PrewarmAllPools();
     }
 
+    private static Shader FindSafeShader(params string[] candidates)
+    {
+        foreach (string name in candidates)
+        {
+            Shader s = Shader.Find(name);
+            if (s != null) return s;
+        }
+        return Shader.Find("Sprites/Default");
+    }
+
     private void EnsureProceduralVFXTemplates()
     {
-        Shader particleShader = Shader.Find("Universal Render Pipeline/Particles/Unlit")
-            ?? Shader.Find("Particles/Standard Unlit")
-            ?? Shader.Find("Universal Render Pipeline/Unlit")
-            ?? Shader.Find("Standard");
+        Shader particleShader = FindSafeShader(
+            "Universal Render Pipeline/Particles/Unlit",
+            "Particles/Standard Unlit",
+            "Universal Render Pipeline/Unlit",
+            "Universal Render Pipeline/Lit",
+            "Sprites/Default");
 
-        cachedParticleMat = new Material(particleShader);
-        if (cachedParticleMat.HasProperty("_BaseColor"))
-            cachedParticleMat.SetColor("_BaseColor", Color.white);
-        cachedParticleMat.color = Color.white;
+        if (particleShader != null)
+        {
+            cachedParticleMat = new Material(particleShader);
+            if (cachedParticleMat.HasProperty("_BaseColor"))
+                cachedParticleMat.SetColor("_BaseColor", Color.white);
+            cachedParticleMat.color = Color.white;
+        }
 
         if (buildPlaceVFX == null)
             buildPlaceVFX = CreateBurstTemplate("VFX_Template_Dust", new Color(0.68f, 0.58f, 0.44f, 0.85f), 0.14f, 3.2f, 14, 0.55f, 0.4f);
@@ -101,19 +116,22 @@ public class VFXPoolManager : MonoBehaviour
         Collider col = obj.GetComponent<Collider>();
         if (col != null) Destroy(col);
 
-        Shader decalShader = Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Particles/Standard Unlit") ?? Shader.Find("Standard");
-        Material mat = new Material(decalShader);
-        Texture2D tex = GetOrCreateSplatterTexture();
-        if (mat.HasProperty("_BaseMap")) mat.SetTexture("_BaseMap", tex);
-        mat.mainTexture = tex;
-        if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", tint);
-        mat.color = tint;
-        if (mat.HasProperty("_Surface")) mat.SetFloat("_Surface", 1f);
-        mat.renderQueue = 3000;
-
+        Shader decalShader = FindSafeShader(
+            "Universal Render Pipeline/Unlit",
+            "Particles/Standard Unlit",
+            "Universal Render Pipeline/Lit",
+            "Sprites/Default");
         Renderer r = obj.GetComponent<Renderer>();
-        if (r != null)
+        if (decalShader != null && r != null)
         {
+            Material mat = new Material(decalShader);
+            Texture2D tex = GetOrCreateSplatterTexture();
+            if (mat.HasProperty("_BaseMap")) mat.SetTexture("_BaseMap", tex);
+            mat.mainTexture = tex;
+            if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", tint);
+            mat.color = tint;
+            if (mat.HasProperty("_Surface")) mat.SetFloat("_Surface", 1f);
+            mat.renderQueue = 3000;
             r.sharedMaterial = mat;
             r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         }

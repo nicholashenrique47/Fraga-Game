@@ -302,7 +302,7 @@ public class MapRenderer : MonoBehaviour
             {
                 Vector3 v = verts[i];
                 float wobble = 0.84f + 0.24f * Mathf.Sin(v.x * 7.3f + v.z * 5.1f) * Mathf.Cos(v.y * 6.7f);
-                verts[i] = new Vector3(v.x * 0.36f * wobble, v.y * 0.22f * wobble, v.z * 0.32f * wobble);
+                verts[i] = new Vector3(v.x * 0.56f * wobble, v.y * 0.36f * wobble, v.z * 0.50f * wobble);
             }
             s_looseStoneMesh.vertices = verts;
             s_looseStoneMesh.RecalculateNormals();
@@ -339,14 +339,15 @@ public class MapRenderer : MonoBehaviour
 
         MeshRenderer mr = go.AddComponent<MeshRenderer>();
         mr.sharedMaterial = s_looseStoneMat;
+        if (Application.isMobilePlatform) mr.shadowCastingMode = ShadowCastingMode.Off;
 
         SphereCollider col = go.AddComponent<SphereCollider>();
-        col.radius = 0.44f;
-        col.center = new Vector3(0f, 0.08f, 0f);
+        col.radius = 0.68f;
+        col.center = new Vector3(0f, 0.14f, 0f);
         col.isTrigger = true;
 
         ResourcePickup pickup = go.AddComponent<ResourcePickup>();
-        pickup.ResetPickupState(101, amount, chunkKey.HasValue, chunkKey ?? Vector2Int.zero, launch: false, rotate: false, lifetime: 0f, magnet: 1.35f);
+        pickup.ResetPickupState(101, amount, chunkKey.HasValue, chunkKey ?? Vector2Int.zero, launch: false, rotate: false, lifetime: 0f, magnet: 0f);
         if (chunkKey.HasValue) pickup.onRecycle = recycleLooseStoneAction;
 
         return go;
@@ -363,15 +364,15 @@ public class MapRenderer : MonoBehaviour
             CombineInstance[] combine = new CombineInstance[2];
             combine[0].mesh = main.GetComponent<MeshFilter>().sharedMesh;
             combine[0].transform = Matrix4x4.TRS(
-                new Vector3(0f, 0.045f, 0f),
+                new Vector3(0f, 0.085f, 0f),
                 Quaternion.Euler(88f, 0f, 0f),
-                new Vector3(0.065f, 0.34f, 0.065f));
+                new Vector3(0.105f, 0.50f, 0.105f));
 
             combine[1].mesh = twig.GetComponent<MeshFilter>().sharedMesh;
             combine[1].transform = Matrix4x4.TRS(
-                new Vector3(0.08f, 0.06f, 0.08f),
+                new Vector3(0.11f, 0.10f, 0.11f),
                 Quaternion.Euler(78f, 38f, 12f),
-                new Vector3(0.042f, 0.16f, 0.042f));
+                new Vector3(0.068f, 0.25f, 0.068f));
 
             s_looseBranchMesh = new Mesh { name = "Procedural_LooseBranch_Mesh" };
             s_looseBranchMesh.CombineMeshes(combine, true, true);
@@ -411,14 +412,15 @@ public class MapRenderer : MonoBehaviour
 
         MeshRenderer mr = go.AddComponent<MeshRenderer>();
         mr.sharedMaterial = s_looseBranchMat;
+        if (Application.isMobilePlatform) mr.shadowCastingMode = ShadowCastingMode.Off;
 
         SphereCollider col = go.AddComponent<SphereCollider>();
-        col.radius = 0.48f;
-        col.center = new Vector3(0f, 0.08f, 0f);
+        col.radius = 0.68f;
+        col.center = new Vector3(0f, 0.14f, 0f);
         col.isTrigger = true;
 
         ResourcePickup pickup = go.AddComponent<ResourcePickup>();
-        pickup.ResetPickupState(100, amount, chunkKey.HasValue, chunkKey ?? Vector2Int.zero, launch: false, rotate: false, lifetime: 0f, magnet: 1.35f);
+        pickup.ResetPickupState(100, amount, chunkKey.HasValue, chunkKey ?? Vector2Int.zero, launch: false, rotate: false, lifetime: 0f, magnet: 0f);
         if (chunkKey.HasValue) pickup.onRecycle = recycleLooseBranchAction;
 
         return go;
@@ -1084,7 +1086,7 @@ public class MapRenderer : MonoBehaviour
             float sx = centerX + offsets[i].dx;
             float sz = centerZ + offsets[i].dz;
             if (FragaWorldBlueprint.GetWaterDepth(sx, sz) > 0.05f) continue;
-            float sy = TerrainMeshGenerator.GetTerrainHeight(sx, sz) + 0.06f;
+            float sy = TerrainMeshGenerator.GetTerrainHeight(sx, sz) + 0.11f;
             float s = offsets[i].amt > 1 ? 1.25f : Random.Range(0.88f, 1.12f);
             CreateLooseStonePickup(
                 new Vector3(sx, sy, sz),
@@ -1103,7 +1105,7 @@ public class MapRenderer : MonoBehaviour
             float bx = centerX + offsets[i].dx;
             float bz = centerZ + offsets[i].dz;
             if (FragaWorldBlueprint.GetWaterDepth(bx, bz) > 0.05f) continue;
-            float by = TerrainMeshGenerator.GetTerrainHeight(bx, bz) + 0.03f;
+            float by = TerrainMeshGenerator.GetTerrainHeight(bx, bz) + 0.08f;
             CreateLooseBranchPickup(
                 new Vector3(bx, by, bz),
                 Quaternion.Euler(Random.Range(-4f, 4f), Random.Range(0f, 360f), Random.Range(-4f, 4f)),
@@ -1118,11 +1120,17 @@ public class MapRenderer : MonoBehaviour
     {
         // 1. Acampamento Inicial (Spawn do Iago)
         Vector2 camp = FragaWorldBlueprint.CrashCampPos;
-        SpawnLandmark(crashCampShelterPrefab, camp.x - 4.5f, camp.y + 3.2f, 138f, 1.05f);
-        SpawnLandmark(campfirePrefab, camp.x, camp.y + 2.8f, 0f, 1.0f);
-        SpawnLandmark(workbenchPrefab, camp.x + 4.2f, camp.y + 1.8f, -35f, 1.0f);
-        SpawnLandmark(waterCatcherPrefab, camp.x - 3.8f, camp.y - 3.5f, 25f, 1.0f);
-        SpawnLandmark(fallenLogPrefab, camp.x + 2.2f, camp.y + 4.4f, 15f, 1.0f);
+        GameObject campShelter = SpawnLandmark(crashCampShelterPrefab, camp.x - 4.5f, camp.y + 3.2f, 138f, 1.05f);
+        if (campShelter != null)
+        {
+            ShelterInteractable si = campShelter.GetComponent<ShelterInteractable>() ?? campShelter.AddComponent<ShelterInteractable>();
+            si.isCabin = false;
+            EnsureInteractableCollider(campShelter, new Vector3(2.4f, 1.8f, 2.4f));
+        }
+        EnsureStationInteractable(SpawnLandmark(campfirePrefab, camp.x, camp.y + 2.8f, 0f, 1.0f), 4);
+        EnsureStationInteractable(SpawnLandmark(workbenchPrefab, camp.x + 4.2f, camp.y + 1.8f, -35f, 1.0f), 13);
+        EnsureStationInteractable(SpawnLandmark(waterCatcherPrefab, camp.x - 3.8f, camp.y - 3.5f, 25f, 1.0f), 12);
+        EnsureStationInteractable(SpawnLandmark(fallenLogPrefab, camp.x + 2.2f, camp.y + 4.4f, 15f, 1.0f), 18);
 
         // Pedras soltas visiveis ao redor do acampamento inicial (estilo The Forest - coleta sem ferramenta)
         SpawnLooseStoneCluster(camp.x, camp.y, new (float, float, int)[]
@@ -1151,37 +1159,39 @@ public class MapRenderer : MonoBehaviour
         });
 
         // Arbustos de bagas e cogumelos proximos ao acampamento para fibra/alimento inicial
-        SpawnLandmark(berryPrefab, Mathf.Round(camp.x + 6f), Mathf.Round(camp.y + 3f), 25f, 1.0f);
-        SpawnLandmark(berryPrefab, Mathf.Round(camp.x - 7f), Mathf.Round(camp.y - 2f), 140f, 1.0f);
-        SpawnLandmark(mushroomPrefab, Mathf.Round(camp.x + 5f), Mathf.Round(camp.y - 5f), 60f, 1.05f);
-        SpawnLandmark(mushroomPrefab, Mathf.Round(camp.x - 6f), Mathf.Round(camp.y + 6f), 210f, 1.05f);
+        EnsureStationInteractable(SpawnLandmark(berryPrefab, Mathf.Round(camp.x + 6f), Mathf.Round(camp.y + 3f), 25f, 1.0f), 9);
+        EnsureStationInteractable(SpawnLandmark(berryPrefab, Mathf.Round(camp.x - 7f), Mathf.Round(camp.y - 2f), 140f, 1.0f), 9);
+        EnsureStationInteractable(SpawnLandmark(mushroomPrefab, Mathf.Round(camp.x + 5f), Mathf.Round(camp.y - 5f), 60f, 1.05f), 10);
+        EnsureStationInteractable(SpawnLandmark(mushroomPrefab, Mathf.Round(camp.x - 6f), Mathf.Round(camp.y + 6f), 210f, 1.05f), 10);
+        EnsureStationInteractable(SpawnLandmark(fentoPrefab, Mathf.Round(camp.x - 2f), Mathf.Round(camp.y + 3.5f), 85f, 1.1f), 10);
+        EnsureStationInteractable(SpawnLandmark(thornyBushPrefab, Mathf.Round(camp.x + 3.5f), Mathf.Round(camp.y - 2.5f), 195f, 1.05f), 19);
 
         // 2. Farol Celta (Win Condition no Penhasco Sudeste)
         Vector2 farol = FragaWorldBlueprint.FarolBluffPos;
         SpawnLandmark(farolCeltaPrefab, farol.x, farol.y, -40f, 1.15f);
-        SpawnLandmark(runicStonePrefab, farol.x - 7f, farol.y + 5f, 30f, 1.0f);
-        SpawnLandmark(runicStonePrefab, farol.x + 5f, farol.y + 7f, -20f, 1.0f);
+        EnsureStationInteractable(SpawnLandmark(runicStonePrefab, farol.x - 7f, farol.y + 5f, 30f, 1.0f), 17);
+        EnsureStationInteractable(SpawnLandmark(runicStonePrefab, farol.x + 5f, farol.y + 7f, -20f, 1.0f), 17);
 
         // 3. Castro Celta (Henge central + 3 Cabanas Castrejas + Cruzes + Fogueira ritual)
         Vector2 castro = FragaWorldBlueprint.CelticCastroPos;
         GameObject castroHenge = SpawnLandmark(stoneCircleHengePrefab, castro.x, castro.y, 12f, 1.05f);
         if (castroHenge != null) AttachRockNode(castroHenge, new Vector2Int(Mathf.RoundToInt(castro.x), Mathf.RoundToInt(castro.y)), 2, true);
-        SpawnLandmark(castroRoundhousePrefab, castro.x - 14f, castro.y + 10f, 128f, 1.0f);
-        SpawnLandmark(castroRoundhousePrefab, castro.x + 15f, castro.y + 8f, 225f, 1.0f);
-        SpawnLandmark(castroRoundhousePrefab, castro.x - 2f, castro.y - 16f, 10f, 1.0f);
-        SpawnLandmark(campfirePrefab, castro.x, castro.y, 0f, 1.15f);
-        SpawnLandmark(celticCrossPrefab, castro.x - 10f, castro.y - 6f, 45f, 1.1f);
-        SpawnLandmark(celticCrossPrefab, castro.x + 10f, castro.y - 7f, -45f, 1.1f);
-        SpawnLandmark(ancientGravePrefab, castro.x + 17f, castro.y - 3f, 80f, 1.0f);
-        SpawnLandmark(ancientGravePrefab, castro.x - 17f, castro.y - 4f, -80f, 1.0f);
+        AttachWorldCabinShelter(SpawnLandmark(castroRoundhousePrefab, castro.x - 14f, castro.y + 10f, 128f, 1.0f));
+        AttachWorldCabinShelter(SpawnLandmark(castroRoundhousePrefab, castro.x + 15f, castro.y + 8f, 225f, 1.0f));
+        AttachWorldCabinShelter(SpawnLandmark(castroRoundhousePrefab, castro.x - 2f, castro.y - 16f, 10f, 1.0f));
+        EnsureStationInteractable(SpawnLandmark(campfirePrefab, castro.x, castro.y, 0f, 1.15f), 4);
+        EnsureStationInteractable(SpawnLandmark(celticCrossPrefab, castro.x - 10f, castro.y - 6f, 45f, 1.1f), 21);
+        EnsureStationInteractable(SpawnLandmark(celticCrossPrefab, castro.x + 10f, castro.y - 7f, -45f, 1.1f), 21);
+        EnsureStationInteractable(SpawnLandmark(ancientGravePrefab, castro.x + 17f, castro.y - 3f, 80f, 1.0f), 22);
+        EnsureStationInteractable(SpawnLandmark(ancientGravePrefab, castro.x - 17f, castro.y - 4f, -80f, 1.0f), 22);
 
         // 4. Gruta do Anciao (arco rochoso + runas + cogumelos luminosos + pedras soltas)
         Vector2 cave = FragaWorldBlueprint.SacredCavePos;
         GameObject caveArch = SpawnLandmark(caveArchGrottoPrefab, cave.x, cave.y, 145f, 1.05f);
         if (caveArch != null) AttachRockNode(caveArch, new Vector2Int(Mathf.RoundToInt(cave.x), Mathf.RoundToInt(cave.y)), 8, true);
-        SpawnLandmark(runicStonePrefab, cave.x + 6f, cave.y - 5f, -35f, 1.05f);
-        SpawnLandmark(glowMushroomPrefab, cave.x - 3f, cave.y - 3f, 20f, 1.25f);
-        SpawnLandmark(glowMushroomPrefab, cave.x + 3f, cave.y - 4f, 110f, 1.15f);
+        EnsureStationInteractable(SpawnLandmark(runicStonePrefab, cave.x + 6f, cave.y - 5f, -35f, 1.05f), 17);
+        EnsureStationInteractable(SpawnLandmark(glowMushroomPrefab, cave.x - 3f, cave.y - 3f, 20f, 1.25f), 20);
+        EnsureStationInteractable(SpawnLandmark(glowMushroomPrefab, cave.x + 3f, cave.y - 4f, 110f, 1.15f), 20);
         SpawnLooseStoneCluster(cave.x, cave.y, new (float, float, int)[]
         {
             (-4.5f, -5.2f, 2),
@@ -1199,8 +1209,8 @@ public class MapRenderer : MonoBehaviour
         Vector2 summit = FragaWorldBlueprint.MountainSummitPos;
         GameObject summitHenge = SpawnLandmark(stoneCircleHengePrefab, summit.x, summit.y, 0f, 0.78f);
         if (summitHenge != null) AttachRockNode(summitHenge, new Vector2Int(Mathf.RoundToInt(summit.x), Mathf.RoundToInt(summit.y)), 2, true);
-        SpawnLandmark(campfirePrefab, summit.x, summit.y, 0f, 1.1f);
-        SpawnLandmark(celticCrossPrefab, summit.x + 6f, summit.y - 4f, -30f, 1.1f);
+        EnsureStationInteractable(SpawnLandmark(campfirePrefab, summit.x, summit.y, 0f, 1.1f), 4);
+        EnsureStationInteractable(SpawnLandmark(celticCrossPrefab, summit.x + 6f, summit.y - 4f, -30f, 1.1f), 21);
 
         // 6. Lago da Fraga (Pier Oeste de Pesca + Fogueira + pedras na margem)
         Vector2 lake = FragaWorldBlueprint.HighlandLakePos;
@@ -1214,8 +1224,8 @@ public class MapRenderer : MonoBehaviour
             EnsureValidMaterials(pier);
             activeInstances[new Vector2Int(Mathf.RoundToInt(lake.x - 38f), Mathf.RoundToInt(lake.y))] = pier;
         }
-        SpawnLandmark(campfirePrefab, lake.x - 46f, lake.y - 4f, 0f, 1.0f);
-        SpawnLandmark(fallenLogPrefab, lake.x - 45f, lake.y - 7f, 22f, 1.0f);
+        EnsureStationInteractable(SpawnLandmark(campfirePrefab, lake.x - 46f, lake.y - 4f, 0f, 1.0f), 4);
+        EnsureStationInteractable(SpawnLandmark(fallenLogPrefab, lake.x - 45f, lake.y - 7f, 22f, 1.0f), 18);
         SpawnLooseStoneCluster(lake.x - 46f, lake.y - 4f, new (float, float, int)[]
         {
             ( 2.4f,  2.1f, 1),
@@ -1252,7 +1262,7 @@ public class MapRenderer : MonoBehaviour
         SpawnLandmark(swampTotemPrefab, swamp.x + 14f, swamp.y + 10f, 220f, 1.1f);
         SpawnLandmark(swampTotemPrefab, swamp.x - 16f, swamp.y + 6f, 140f, 1.05f);
         SpawnLandmark(swampTotemPrefab, swamp.x + 2f, swamp.y - 18f, 15f, 1.15f);
-        SpawnLandmark(glowMushroomPrefab, swamp.x, swamp.y, 0f, 1.3f);
+        EnsureStationInteractable(SpawnLandmark(glowMushroomPrefab, swamp.x, swamp.y, 0f, 1.3f), 20);
 
         // 9. Baus de Suprimentos e Notas de Historia (Lore) nos POIs principais
         SpawnPoiCrateAndNote(camp.x + 1.8f, camp.y - 1.6f, "Caixa do Acampamento", new[] { 205, 206, 118, 102, 109 }, 0, "Diario: Dia 12");
@@ -1261,6 +1271,14 @@ public class MapRenderer : MonoBehaviour
         SpawnPoiCrateAndNote(cave.x - 1.5f, cave.y + 2.0f, "Bau da Gruta do Anciao", new[] { 107, 102, 117, 206, 120 }, 3, "Diario: Dia 40 (Gruta)");
         SpawnPoiCrateAndNote(summit.x - 3.5f, summit.y + 2.5f, "Oferenda do Pico", new[] { 107, 106, 204, 213, 116 }, 4, "Diario: Dia 41 (Altar)");
         SpawnPoiCrateAndNote(farol.x + 3.5f, farol.y - 4.0f, "Caixa do Faroleiro", new[] { 102, 205, 107, 206, 109 }, 5, "Notas do Faroleiro");
+    }
+
+    private static void AttachWorldCabinShelter(GameObject cabinObj)
+    {
+        if (cabinObj == null) return;
+        ShelterInteractable si = cabinObj.GetComponent<ShelterInteractable>() ?? cabinObj.AddComponent<ShelterInteractable>();
+        si.isCabin = true;
+        EnsureInteractableCollider(cabinObj, new Vector3(3.8f, 2.7f, 3.8f), isTrigger: true);
     }
 
     private void SpawnPoiCrateAndNote(float wx, float wz, string chestName, int[] items, int loreIdx, string noteTitle)
@@ -1387,7 +1405,7 @@ public class MapRenderer : MonoBehaviour
         int pChunkX = Mathf.Clamp(Mathf.FloorToInt(playerPos.x / (cSize * tileSize)), 0, chunksX - 1);
         int pChunkZ = Mathf.Clamp(Mathf.FloorToInt(playerPos.z / (cSize * tileSize)), 0, chunksZ - 1);
 
-        int streamRadius = Application.isMobilePlatform ? 2 : 3;
+        int streamRadius = Application.isMobilePlatform ? 1 : 3;
         int unloadRadius = streamRadius + 1;
 
         // 1. Descarrega chunks distantes para manter orcamento de memoria/colliders enxuto no mobile
@@ -1409,7 +1427,7 @@ public class MapRenderer : MonoBehaviour
         }
 
         // 2. Carrega chunks proximos de forma progressiva (zero engasgos de frame)
-        int spawnBudget = Application.isMobilePlatform ? 18 : 30;
+        int spawnBudget = Application.isMobilePlatform ? 10 : 30;
         int spawnedThisFrame = 0;
 
         for (int ring = 0; ring <= streamRadius && spawnedThisFrame < spawnBudget; ring++)
@@ -1485,7 +1503,7 @@ public class MapRenderer : MonoBehaviour
             ResourcePickup sp = stoneInst.GetComponent<ResourcePickup>();
             if (sp != null)
             {
-                sp.ResetPickupState(101, amt, true, p.gridKey, launch: false, rotate: false, lifetime: 0f, magnet: 1.35f);
+                sp.ResetPickupState(101, amt, true, p.gridKey, launch: false, rotate: false, lifetime: 0f, magnet: 0f);
                 sp.onRecycle = recycleLooseStoneAction;
             }
             stoneInst.SetActive(true);
@@ -1506,7 +1524,7 @@ public class MapRenderer : MonoBehaviour
             ResourcePickup bp = branchInst.GetComponent<ResourcePickup>();
             if (bp != null)
             {
-                bp.ResetPickupState(100, amt, true, p.gridKey, launch: false, rotate: false, lifetime: 0f, magnet: 1.35f);
+                bp.ResetPickupState(100, amt, true, p.gridKey, launch: false, rotate: false, lifetime: 0f, magnet: 0f);
                 bp.onRecycle = recycleLooseBranchAction;
             }
             branchInst.SetActive(true);
@@ -1530,6 +1548,10 @@ public class MapRenderer : MonoBehaviour
             {
                 EnsureValidMaterials(inst);
             }
+            if (Application.isMobilePlatform && IsSmallClutterKind(p.kind))
+            {
+                DisableShadowCasting(inst);
+            }
         }
         else
         {
@@ -1543,9 +1565,31 @@ public class MapRenderer : MonoBehaviour
         {
             AttachRockNode(inst, p.gridKey, p.tileID > 0 ? p.tileID : 8, isPermanent: false);
         }
+        EnsureStationInteractable(inst, p.tileID > 0 ? p.tileID : (p.kind == PropKind.Fern ? 10 : 0));
 
         activeInstances[p.gridKey] = inst;
         activePropKinds[p.gridKey] = p.kind;
+    }
+
+    private static bool IsSmallClutterKind(PropKind kind)
+    {
+        return kind == PropKind.Fern
+            || kind == PropKind.ThornyBush
+            || kind == PropKind.Berry
+            || kind == PropKind.Mushroom
+            || kind == PropKind.GlowMushroom
+            || kind == PropKind.LooseStone
+            || kind == PropKind.LooseBranch;
+    }
+
+    private static void DisableShadowCasting(GameObject go)
+    {
+        if (go == null) return;
+        Renderer[] rends = go.GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < rends.Length; i++)
+        {
+            rends[i].shadowCastingMode = ShadowCastingMode.Off;
+        }
     }
 
     private void UnloadChunk(ChunkData cd)
@@ -1606,7 +1650,7 @@ public class MapRenderer : MonoBehaviour
 
     private void RenderDistantTreeCanopy(Vector3 playerPos, int pChunkX, int pChunkZ)
     {
-        float maxDist = Application.isMobilePlatform ? 290f : 460f;
+        float maxDist = Application.isMobilePlatform ? 175f : 460f;
         float maxDistSq = maxDist * maxDist;
 
         for (int cz = 0; cz < chunksZ; cz++)
@@ -1722,6 +1766,7 @@ public class MapRenderer : MonoBehaviour
         else if (tileID == 8 && rockPrefab != null) inst = Instantiate(rockPrefab, pos, rot, parent);
         else if (tileID == 3 && barricadePrefab != null) inst = Instantiate(barricadePrefab, pos, rot, parent);
         else if (tileID == 4 && campfirePrefab != null) inst = Instantiate(campfirePrefab, pos, rot, parent);
+        else if (tileID == 5) inst = CreateProceduralHeavyTrap(pos, rot, parent);
         else if (tileID == 9 && berryPrefab != null) inst = Instantiate(berryPrefab, pos, rot, parent);
         else if (tileID == 10 && mushroomPrefab != null) inst = Instantiate(mushroomPrefab, pos, rot, parent);
         else if (tileID == 11 && pondPrefab != null) inst = Instantiate(pondPrefab, pos, rot, parent);
@@ -1736,6 +1781,7 @@ public class MapRenderer : MonoBehaviour
         else if (tileID == 20 && glowMushroomPrefab != null) inst = Instantiate(glowMushroomPrefab, pos, rot, parent);
         else if (tileID == 21 && celticCrossPrefab != null) inst = Instantiate(celticCrossPrefab, pos, rot, parent);
         else if (tileID == 22 && ancientGravePrefab != null) inst = Instantiate(ancientGravePrefab, pos, rot, parent);
+        else if (tileID == 25) inst = CreateProceduralSaltCircle(pos, parent);
 
         if (inst != null)
         {
@@ -1745,8 +1791,141 @@ public class MapRenderer : MonoBehaviour
             {
                 AttachRockNode(inst, key, tileID, isPermanent: false);
             }
+            EnsureStationInteractable(inst, tileID);
             activeInstances[key] = inst;
         }
+    }
+
+    private static void EnsureInteractableCollider(GameObject obj, Vector3 fallbackSize, bool isTrigger = false)
+    {
+        if (obj == null) return;
+        Collider rootCol = obj.GetComponent<Collider>();
+        if (rootCol != null)
+        {
+            if (isTrigger && rootCol is BoxCollider existingBox)
+            {
+                existingBox.isTrigger = true;
+            }
+            return;
+        }
+        BoxCollider col = obj.AddComponent<BoxCollider>();
+        col.center = new Vector3(0f, fallbackSize.y * 0.5f, 0f);
+        col.size = fallbackSize;
+        col.isTrigger = isTrigger;
+    }
+
+    private void EnsureStationInteractable(GameObject inst, int tileID)
+    {
+        if (inst == null) return;
+        if (tileID == 4)
+        {
+            BonfireEntity bf = inst.GetComponent<BonfireEntity>() ?? inst.GetComponentInChildren<BonfireEntity>(true);
+            if (bf == null) bf = inst.AddComponent<BonfireEntity>();
+            if (bf.fireLight == null) bf.fireLight = inst.GetComponentInChildren<Light>(true);
+            if (bf.fireParticles == null) bf.fireParticles = inst.GetComponentInChildren<ParticleSystem>(true);
+            EnsureInteractableCollider(inst, new Vector3(1.1f, 0.8f, 1.1f));
+        }
+        else if (tileID == 12)
+        {
+            RainCollectorInteractable rc = inst.GetComponent<RainCollectorInteractable>() ?? inst.GetComponentInChildren<RainCollectorInteractable>(true);
+            if (rc == null)
+            {
+                rc = inst.AddComponent<RainCollectorInteractable>();
+                rc.BuildWaterVisual();
+            }
+            EnsureInteractableCollider(inst, new Vector3(1.15f, 1.25f, 1.15f));
+        }
+        else if (tileID == 13)
+        {
+            CraftingStationMarker marker = inst.GetComponent<CraftingStationMarker>() ?? inst.AddComponent<CraftingStationMarker>();
+            marker.stationType = CraftingStationType.Workbench;
+            EnsureInteractableCollider(inst, new Vector3(1.45f, 1.0f, 1.05f));
+        }
+        else if (tileID == 15)
+        {
+            CraftingStationMarker marker = inst.GetComponent<CraftingStationMarker>() ?? inst.AddComponent<CraftingStationMarker>();
+            marker.stationType = CraftingStationType.Cauldron;
+            EnsureInteractableCollider(inst, new Vector3(1.05f, 0.95f, 1.05f));
+        }
+        else if (tileID == 5 || tileID == 16)
+        {
+            TrapInteractable trap = inst.GetComponent<TrapInteractable>() ?? inst.GetComponentInChildren<TrapInteractable>(true);
+            if (trap == null) trap = inst.AddComponent<TrapInteractable>();
+            Vector2Int key = new Vector2Int(
+                Mathf.RoundToInt(inst.transform.position.x / Mathf.Max(0.01f, tileSize)),
+                Mathf.RoundToInt(inst.transform.position.z / Mathf.Max(0.01f, tileSize)));
+            trap.Configure(tileID, key, armed: true);
+            EnsureInteractableCollider(inst, new Vector3(0.95f, 0.45f, 0.95f), isTrigger: true);
+        }
+        else if (tileID == 9 || tileID == 10 || tileID == 19 || tileID == 20)
+        {
+            EnsureInteractableCollider(inst, new Vector3(0.95f, 0.85f, 0.95f));
+        }
+        else if (tileID == 18)
+        {
+            EnsureInteractableCollider(inst, new Vector3(1.85f, 0.65f, 0.75f));
+        }
+        else if (tileID == 17 || tileID == 21 || tileID == 22)
+        {
+            EnsureInteractableCollider(inst, new Vector3(1.10f, 1.35f, 1.10f));
+        }
+        else if (tileID == 8 || tileID == 2)
+        {
+            EnsureInteractableCollider(inst, new Vector3(1.35f, 1.10f, 1.35f));
+        }
+    }
+
+    private GameObject CreateProceduralHeavyTrap(Vector3 pos, Quaternion rot, Transform parent)
+    {
+        InitFallbackMaterials();
+        EnsurePoiMaterials();
+        GameObject root = new GameObject("HeavyBearTrap");
+        root.transform.SetParent(parent, false);
+        root.transform.SetPositionAndRotation(pos, rot);
+
+        CreatePoiSubPart("Trap_BasePlate", root.transform, PrimitiveType.Cylinder,
+            new Vector3(0f, 0.04f, 0f), Vector3.zero, new Vector3(0.85f, 0.04f, 0.85f), s_poiIronMat);
+        CreatePoiSubPart("Trap_JawL", root.transform, PrimitiveType.Cube,
+            new Vector3(-0.22f, 0.12f, 0f), new Vector3(0f, 0f, 18f), new Vector3(0.14f, 0.14f, 0.72f), s_poiIronMat);
+        CreatePoiSubPart("Trap_JawR", root.transform, PrimitiveType.Cube,
+            new Vector3(0.22f, 0.12f, 0f), new Vector3(0f, 0f, -18f), new Vector3(0.14f, 0.14f, 0.72f), s_poiIronMat);
+        CreatePoiSubPart("Trap_Stake", root.transform, PrimitiveType.Cylinder,
+            new Vector3(0f, 0.08f, -0.45f), Vector3.zero, new Vector3(0.08f, 0.12f, 0.08f), s_barkFallback);
+
+        SphereCollider trig = root.AddComponent<SphereCollider>();
+        trig.radius = 0.55f;
+        trig.isTrigger = true;
+        return root;
+    }
+
+    private GameObject CreateProceduralSaltCircle(Vector3 pos, Transform parent)
+    {
+        Shader lit = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
+        Material saltMat = new Material(lit) { color = new Color(0.95f, 0.97f, 1.0f, 1f) };
+        if (saltMat.HasProperty("_EmissionColor"))
+        {
+            saltMat.EnableKeyword("_EMISSION");
+            saltMat.SetColor("_EmissionColor", new Color(0.45f, 0.58f, 0.75f));
+        }
+
+        GameObject root = new GameObject("SaltProtectionCircle");
+        root.transform.SetParent(parent, false);
+        root.transform.position = pos;
+
+        const int segments = 12;
+        const float radius = 0.72f;
+        for (int i = 0; i < segments; i++)
+        {
+            float a = (i / (float)segments) * Mathf.PI * 2f;
+            Vector3 p = new Vector3(Mathf.Cos(a) * radius, 0.03f, Mathf.Sin(a) * radius);
+            CreatePoiSubPart($"SaltArc_{i}", root.transform, PrimitiveType.Cube,
+                p, new Vector3(0f, -a * Mathf.Rad2Deg, 0f), new Vector3(0.14f, 0.045f, 0.38f), saltMat);
+        }
+
+        SphereCollider trig = root.AddComponent<SphereCollider>();
+        trig.radius = 0.85f;
+        trig.isTrigger = true;
+        return root;
     }
 
     public bool TryHarvestTreeAt(int gridX, int gridY)

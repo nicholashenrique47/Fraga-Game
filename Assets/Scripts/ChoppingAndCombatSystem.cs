@@ -2,20 +2,21 @@
 using System.Collections.Generic;
 
 /// <summary>
-/// ChoppingAndCombatSystem: Sistema unificado de Combate Corpo a Corpo, Corte de Arvores e Mineracao.
-/// - Usa stats reais da arma equipada no ItemDatabase (dano, alcance, cadencia, estamina, durabilidade e multiplicadores de coleta).
-/// - Suporta combo alternado, Golpe Pesado (1.65x), contra-ataque de Parry (2.5x) e fisica NonAlloc (Zero-GC).
-/// - Integra dano direto em Vultos (GPU-Instanced), Fauna selvagem e entidades com Collider, com VFX por material e hitmarker.
-/// - Deixa toco realista (Stump_Cleared) e toras fisicas ao derrubar arvores estilo The Forest, alem de Resina, Ferro e Sal.
+/// ChoppingAndCombatSystem: Sistema unificado de Combate Corpo a Corpo, Corte de Arvores, Mineracao e Coleta de Recursos.
+/// - Regras estritas estilo The Forest:
+///   * Madeira de Arvores e Troncos Caidos SO pode ser cortada com Machado (300/312) — funciona com Clique Esquerdo, Clique Direito ou [E]!
+///   * Rochas e Pedregulhos grandes SO podem ser quebrados com Machado (300/312) ou Picareta (301) — funciona com Clique Esquerdo, Clique Direito ou [E]!
+///   * Se o jogador ja fabricou o Machado/Picareta e ele esta na mochila, clicar na arvore/rocha equipa a ferramenta automaticamente!
+///   * Sem ferramentas, apenas Pedras Soltas no chao, Galhos Soltos no chao e Plantas/Ervas/Bagas podem ser coletados com [E]!
 /// </summary>
 public class ChoppingAndCombatSystem : MonoBehaviour
 {
     public static ChoppingAndCombatSystem Instance { get; private set; }
 
     [Header("Fallback Fists Settings")]
-    public float baseAttackRange = 2.25f;
-    public float attackRadius = 0.28f;
-    public float baseAttackCooldown = 0.40f;
+    public float baseAttackRange = 3.20f;
+    public float attackRadius = 0.42f;
+    public float baseAttackCooldown = 0.34f;
     public float baseDamage = 12f;
 
     [Header("Dependencies")]
@@ -26,6 +27,7 @@ public class ChoppingAndCombatSystem : MonoBehaviour
 
     private float lastAttackTime = -10f;
     private int comboStep = 0;
+    private float comboResetTimer = 0f;
 
     private AudioSource audioSource;
     private AudioClip chopWoodClip;
@@ -35,11 +37,13 @@ public class ChoppingAndCombatSystem : MonoBehaviour
     private AudioClip hitFleshClip;
 
     private MapRenderer mapRendererCache;
+    private ResourceManager resourceManagerCache;
     private HapticManager hapticCache;
     private Material cachedStumpTopMat;
 
     private readonly Dictionary<int, int> treeHitsRemaining = new Dictionary<int, int>();
-    private readonly RaycastHit[] hitBuffer = new RaycastHit[12];
+    private readonly RaycastHit[] hitBuffer = new RaycastHit[24];
+    private readonly Collider[] nearBuffer = new Collider[24];
 
     private void Awake()
     {
@@ -54,6 +58,7 @@ public class ChoppingAndCombatSystem : MonoBehaviour
         if (playerStatus == null) playerStatus = PlayerStatus.Instance ?? GetComponent<PlayerStatus>();
         if (inventory == null) inventory = InventoryAdvanced.Instance ?? FindAnyObjectByType<InventoryAdvanced>();
         mapRendererCache = FindAnyObjectByType<MapRenderer>();
+        resourceManagerCache = FindAnyObjectByType<ResourceManager>();
         hapticCache = FindAnyObjectByType<HapticManager>();
     }
 
@@ -70,12 +75,119 @@ public class ChoppingAndCombatSystem : MonoBehaviour
         hitFleshClip = GenerateFleshHitSound();
     }
 
+    public static bool IsAxeEquipped(InventoryAdvanced inv)
+    {
+        return inv != null && (inv.equippedMainHandId == 300 || inv.equippedMainHandId == 312);
+    }
+
+    public static bool IsRockToolEquipped(InventoryAdvanced inv)
+    {
+        return inv != null && (inv.equippedMainHandId == 300 || inv.equippedMainHandId == 312 || inv.equippedMainHandId == 301);
+    }
+
+    /// <summary>
+    /// Se o jogador ja estiver com o Machado equipado retorna true; se tiver Machado utilizavel na mochila e estiver desarmado/com outra ferramenta basica,
+    /// equipa o Machado automaticamente para que o clique funcione na hora!
+    /// </summary>
+    public static bool EnsureAxeEquipped(InventoryAdvanced inv, bool autoEquipFromBag = true)
+    {
+        if (inv == null) return false;
+        if (IsAxeEquipped(inv)) return true;
+        if (!autoEquipFromBag) return false;
+
+        if (inv.FindUsableEquipmentSlot(312) >= 0 && inv.EquipItem(312))
+            return true;
+        if (inv.FindUsableEquipmentSlot(300) >= 0 && inv.EquipItem(300))
+            return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Garante Machado ou Picareta equipada para quebrar rochas (equipa da mochila se disponivel).
+    /// </summary>
+    public static bool EnsureRockToolEquipped(InventoryAdvanced inv, bool autoEquipFromBag = true)
+    {
+        if (inv == null) return false;
+        if (IsRockToolEquipped(inv)) return true;
+        if (!autoEquipFromBag) return false;
+
+        if (inv.FindUsableEquipmentSlot(301) >= 0 && inv.EquipItem(301))
+            return true;
+        if (inv.FindUsableEquipmentSlot(312) >= 0 && inv.EquipItem(312))
+            return true;
+        if (inv.FindUsableEquipmentSlot(300) >= 0 && inv.EquipItem(300))
+            return true;
+        return false;
+    }
+
+    public bool TryCheckRightClickHarvestWarning()
+    {
+        if (playerCamera == null) playerCamera = Camera.main;
+        if (playerCamera == null) return false;
+        if (inventory == null) inventory = InventoryAdvanced.Instance;
+
+        Ray ray = new Ray(playerCamera.transform.position, playerCamera.transform.forward);
+        if (!TryFindBestHit(ray, baseAttackRange + 0.65f, out RaycastHit hit) || hit.collider == null)
+            return false;
+
+        if (IsTreeCollider(hit.collider) || IsFallenLogCollider(hit.collider))
+        {
+            if (EnsureAxeEquipped(inventory, true))
+            {
+                TriggerAttack(false, true);
+                return true;
+            }
+            ShowToolRequiredForWoodWarning();
+            return true;
+        }
+        if (IsRockCollider(hit.collider))
+        {
+            if (EnsureRockToolEquipped(inventory, true))
+            {
+                TriggerAttack(false, true);
+                return true;
+            }
+            ShowToolRequiredForRockWarning();
+            return true;
+        }
+        return false;
+    }
+
+    public void ShowToolRequiredForWoodWarning()
+    {
+        if (inventory == null) inventory = InventoryAdvanced.Instance;
+        bool hasAxeInBag = inventory != null && (inventory.HasItem(300) || inventory.HasItem(312));
+        if (HUDSurvivalOverlay.Instance != null)
+        {
+            HUDSurvivalOverlay.Instance.ShowLootTooltip(hasAxeInBag
+                ? "<color=#FFCC44>Equipe o Machado na mao (Tecla [1] ou Mochila [I]) e clique para cortar!</color>"
+                : "<color=#FFBB44>Precisa de MACHADO para cortar arvores! Pegue Galhos, Pedras e Ervas no chao com [E] e crie no menu [I].</color>");
+        }
+    }
+
+    public void ShowToolRequiredForRockWarning()
+    {
+        if (inventory == null) inventory = InventoryAdvanced.Instance;
+        bool hasToolInBag = inventory != null && (inventory.HasItem(300) || inventory.HasItem(312) || inventory.HasItem(301));
+        if (HUDSurvivalOverlay.Instance != null)
+        {
+            HUDSurvivalOverlay.Instance.ShowLootTooltip(hasToolInBag
+                ? "<color=#FFCC44>Equipe o Machado ou Picareta na mao e clique para quebrar rochas!</color>"
+                : "<color=#FFBB44>Precisa de MACHADO ou PICARETA para quebrar rochas! Sem ferramentas, pegue apenas Pedras Soltas no chao com [E].</color>");
+        }
+    }
+
     public void TriggerAttack()
     {
-        TriggerAttack(false);
+        TriggerAttack(false, false);
     }
 
     public void TriggerAttack(bool isHeavy)
+    {
+        TriggerAttack(isHeavy, false);
+    }
+
+    public void TriggerAttack(bool isHeavy, bool fromRightMouse)
     {
         if (inventory == null) inventory = InventoryAdvanced.Instance;
         if (playerStatus == null) playerStatus = PlayerStatus.Instance;
@@ -96,20 +208,32 @@ public class ChoppingAndCombatSystem : MonoBehaviour
         if (isHeavy) cooldown *= 1.18f;
         if (Time.time < lastAttackTime + cooldown) return;
 
-        float staminaCost = (weaponData != null ? weaponData.staminaCost : 7f) * (isHeavy ? 1.55f : 1f);
-        if (playerStatus != null && playerStatus.stamina < 4f)
+        float staminaCost = (weaponData != null ? weaponData.staminaCost : 6f) * (isHeavy ? 1.55f : 1f);
+        if (playerStatus != null && !playerStatus.CanSpendStamina(4f))
         {
             if (HUDSurvivalOverlay.Instance != null)
-                HUDSurvivalOverlay.Instance.ShowLootTooltip("Sem folego para golpear!");
+                HUDSurvivalOverlay.Instance.ShowLootTooltip(playerStatus.isExhausted
+                    ? "<color=#FF8844>Exausto! Aguarde o folego recuperar.</color>"
+                    : "Sem folego para golpear!");
             return;
         }
         if (playerStatus != null)
         {
             playerStatus.stamina = Mathf.Max(0f, playerStatus.stamina - staminaCost);
+            if (playerStatus.stamina <= 0.5f) playerStatus.isExhausted = true;
         }
 
+        if (Time.time - lastAttackTime > 1.4f)
+        {
+            comboStep = 0;
+        }
+        else
+        {
+            comboStep = (comboStep + 1) % 3;
+        }
         lastAttackTime = Time.time;
-        comboStep = (comboStep + 1) % 2;
+        comboResetTimer = 1.4f;
+        bool isFinisher = comboStep == 2;
 
         if (FirstPersonViewmodelController.Instance != null)
         {
@@ -121,7 +245,11 @@ public class ChoppingAndCombatSystem : MonoBehaviour
             FragaStealthSystem.Instance.EmitNoisePulse(isHeavy ? 0.85f : 0.55f);
         }
 
-        if (audioSource != null && swingWhooshClip != null)
+        if (AudioManager.Instance != null)
+        {
+            AudioManager.Instance.PlayFoley(isHeavy ? AudioManager.FoleyEventType.SwingHeavy : AudioManager.FoleyEventType.SwingLight, transform.position, isHeavy ? 0.64f : 0.46f, 0.90f, 1.10f);
+        }
+        else if (audioSource != null && swingWhooshClip != null)
         {
             audioSource.pitch = isHeavy ? Random.Range(0.76f, 0.88f) : Random.Range(0.95f, 1.12f);
             audioSource.PlayOneShot(swingWhooshClip, isHeavy ? 0.55f : 0.38f);
@@ -129,15 +257,22 @@ public class ChoppingAndCombatSystem : MonoBehaviour
 
         if (playerCamera == null) return;
 
-        float range = weaponData != null ? weaponData.attackRange : baseAttackRange;
+        float range = weaponData != null ? Mathf.Max(baseAttackRange, weaponData.attackRange + 0.65f) : baseAttackRange;
+        if (weaponId == 308) range += 0.55f; // Lanca Celta tem alcance estendido
+
         float damage = (weaponData != null ? weaponData.attackDamage : baseDamage) * (isHeavy ? 1.65f : 1f);
+        if (isFinisher) damage *= 1.28f;
+
+        bool isStealthAmbush = FragaStealthSystem.Instance != null && FragaStealthSystem.Instance.IsHidden;
+        float stealthMult = isStealthAmbush ? (weaponId == 302 ? 2.55f : 2.25f) : 1f;
+        bool hasTorchOffhand = inventory != null && inventory.equippedOffHandId == 303;
         float treeMult = weaponData != null ? weaponData.harvestTreeMultiplier : 1f;
         float rockMult = weaponData != null ? weaponData.harvestRockMultiplier : 1f;
 
         Ray ray = new Ray(playerCamera.transform.position, playerCamera.transform.forward);
         bool hasColliderHit = TryFindBestHit(ray, range, out RaycastHit bestHit);
 
-        float obstacleLimit = range + 0.35f;
+        float obstacleLimit = range + 0.45f;
         if (hasColliderHit && bestHit.collider != null && IsStaticObstacle(bestHit.collider))
         {
             obstacleLimit = Mathf.Min(obstacleLimit, bestHit.distance + 0.45f);
@@ -146,11 +281,12 @@ public class ChoppingAndCombatSystem : MonoBehaviour
         // 1. Prioriza entidades sombrias (Vultos GPU-Instanced) no cone frontal
         if (VultoManager.Instance != null)
         {
-            float previewDamage = PreviewParryDamage(damage, out _);
+            float vultoDmg = damage * stealthMult * (hasTorchOffhand ? 1.25f : 1f);
+            float previewDamage = PreviewParryDamage(vultoDmg, out _);
             if (VultoManager.Instance.TryDamageVultoInRay(ray, obstacleLimit, attackRadius + 0.28f, previewDamage, ray.direction, out Vector3 vultoHitPos, out bool vultoKilled))
             {
                 bool parryCrit = ConsumeParryCrit();
-                HandleLivingTargetFeedback(vultoHitPos, Vector3.up, previewDamage, parryCrit, isHeavy, vultoKilled, isShadow: true);
+                HandleLivingTargetFeedback(vultoHitPos, Vector3.up, previewDamage, parryCrit, isHeavy || isFinisher, vultoKilled, isShadow: true, isStealthCrit: isStealthAmbush);
                 DegradeEquippedTool();
                 return;
             }
@@ -159,21 +295,153 @@ public class ChoppingAndCombatSystem : MonoBehaviour
         // 2. Verifica animais controlados pelo FaunaManager (SoA nativo / procedural)
         if (FaunaManager.Instance != null)
         {
-            float previewDamage = PreviewParryDamage(damage, out _);
+            float faunaDmg = damage * stealthMult;
+            float previewDamage = PreviewParryDamage(faunaDmg, out _);
             if (FaunaManager.Instance.TryDamageFaunaInRay(ray, obstacleLimit, attackRadius + 0.22f, previewDamage, out Vector3 faunaHitPos, out bool faunaKilled))
             {
                 bool parryCrit = ConsumeParryCrit();
-                HandleLivingTargetFeedback(faunaHitPos, Vector3.up, previewDamage, parryCrit, isHeavy, faunaKilled, isShadow: false);
+                HandleLivingTargetFeedback(faunaHitPos, Vector3.up, previewDamage, parryCrit, isHeavy || isFinisher, faunaKilled, isShadow: false, isStealthCrit: isStealthAmbush);
                 DegradeEquippedTool();
                 return;
             }
         }
 
-        // 3. Processa colisoes fisicas (Arvores, Rochas, Construcoes, WildlifeAIEngine)
+        // 3. Processa colisoes fisicas e recursos (Arvores, Rochas, Troncos, Plantas, Pickups, Blueprints, WildlifeAIEngine)
         if (hasColliderHit)
         {
-            ProcessHit(bestHit, weaponId, damage, isHeavy, treeMult, rockMult);
+            ProcessHit(bestHit, weaponId, damage, isHeavy || isFinisher, treeMult, rockMult, fromRightMouse);
+            return;
         }
+
+        // 4. Fallback em Grid Nativo: caso a arvore/rocha a frente esteja no grid nativo
+        if (resourceManagerCache == null) resourceManagerCache = FindAnyObjectByType<ResourceManager>();
+        if (resourceManagerCache != null && resourceManagerCache.MapDataPtr != System.IntPtr.Zero)
+        {
+            Vector3 fwd = playerCamera.transform.forward;
+            fwd.y = 0f;
+            if (fwd.sqrMagnitude < 0.001f) fwd = transform.forward;
+            fwd.Normalize();
+            Vector3 checkPos = transform.position + fwd * 1.75f;
+            int gx = Mathf.RoundToInt(checkPos.x);
+            int gz = Mathf.RoundToInt(checkPos.z);
+            if (gx >= 0 && gx < resourceManagerCache.MapWidth && gz >= 0 && gz < resourceManagerCache.MapHeight)
+            {
+                int tile = ResourceManager.GetMapCell(resourceManagerCache.MapDataPtr, resourceManagerCache.MapWidth, resourceManagerCache.MapHeight, gx, gz);
+                if (tile == 1 || tile == 2 || tile == 8)
+                {
+                    resourceManagerCache.TryHarvestAtGrid(gx, gz);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Chamado quando o jogador aperta [E] ou botao Interagir em uma Arvore.
+    /// Executa o corte diretamente se tiver Machado equipado (ou na mochila), tanto no PC quanto no Mobile!
+    /// </summary>
+    public void HarvestTreeFromInteraction(Collider col)
+    {
+        if (col == null) return;
+        if (inventory == null) inventory = InventoryAdvanced.Instance;
+
+        if (!EnsureAxeEquipped(inventory, true))
+        {
+            ShowToolRequiredForWoodWarning();
+            return;
+        }
+
+        if (Time.time < lastAttackTime + 0.36f) return;
+
+        if (playerStatus == null) playerStatus = PlayerStatus.Instance;
+        if (playerStatus != null)
+        {
+            if (!playerStatus.CanSpendStamina(4f))
+            {
+                if (HUDSurvivalOverlay.Instance != null)
+                    HUDSurvivalOverlay.Instance.ShowLootTooltip("Sem folego para cortar!");
+                return;
+            }
+            playerStatus.stamina = Mathf.Max(0f, playerStatus.stamina - 6f);
+            if (playerStatus.stamina <= 0.5f) playerStatus.isExhausted = true;
+        }
+        lastAttackTime = Time.time;
+
+        if (FirstPersonViewmodelController.Instance != null)
+        {
+            comboStep = (comboStep + 1) % 2;
+            FirstPersonViewmodelController.Instance.TriggerPrimaryAttack(comboStep, false);
+        }
+
+        ItemData weaponData = ItemDatabase.GetItem(inventory.equippedMainHandId);
+        float treeMult = weaponData != null && weaponData.harvestTreeMultiplier > 1.01f ? weaponData.harvestTreeMultiplier : 2.2f;
+
+        GameObject singleTree = FindSpecificTreeObject(col);
+        if (singleTree != null)
+        {
+            Vector3 hitPoint = col.ClosestPoint(transform.position + Vector3.up * 1.1f);
+            HandleTreeChopAtPoint(hitPoint, Vector3.up, singleTree, treeMult, false);
+            DegradeEquippedTool();
+        }
+    }
+
+    public static bool IsTreeCollider(Collider col)
+    {
+        if (col == null) return false;
+        string colName = col.gameObject.name.ToLower();
+        if (colName.Contains("stump") || colName.Contains("fallen") || colName.Contains("pickup") || colName.Contains("felled"))
+            return false;
+
+        if (col.GetComponentInParent<GalicianProceduralTreeGenerator>() != null)
+            return true;
+
+        Transform cur = col.transform;
+        for (int depth = 0; depth < 4 && cur != null; depth++)
+        {
+            string n = cur.name.ToLower();
+            if (n.StartsWith("chunk_") || n == "environment_instances" || n == "landmarks_global")
+                break;
+            if (n.Contains("tree") || n.Contains("trunk") || n.Contains("foliage") || n.Contains("pine") || n.Contains("arvore"))
+                return true;
+            cur = cur.parent;
+        }
+        return false;
+    }
+
+    public static bool IsFallenLogCollider(Collider col)
+    {
+        if (col == null) return false;
+        Transform cur = col.transform;
+        for (int depth = 0; depth < 4 && cur != null; depth++)
+        {
+            string n = cur.name.ToLower();
+            if (n.StartsWith("chunk_") || n == "environment_instances" || n == "landmarks_global")
+                break;
+            if (n.Contains("fallenlog") || n.Contains("fallen_log") || n.Contains("felled_wood_log") || n.Contains("droppedwood"))
+                return true;
+            cur = cur.parent;
+        }
+        return false;
+    }
+
+    public static bool IsHarvestablePlantCollider(Collider col, out int plantKind)
+    {
+        plantKind = 0; // 9=Berry, 10=Mushroom/Fern, 19=ThornyBush, 20=GlowMushroom
+        if (col == null) return false;
+
+        Transform cur = col.transform;
+        for (int depth = 0; depth < 4 && cur != null; depth++)
+        {
+            string n = cur.name.ToLower();
+            if (n.StartsWith("chunk_") || n == "environment_instances" || n == "landmarks_global")
+                break;
+            if (n.Contains("berry")) { plantKind = 9; return true; }
+            if (n.Contains("glowmushroom") || n.Contains("glow_mushroom")) { plantKind = 20; return true; }
+            if (n.Contains("mushroom")) { plantKind = 10; return true; }
+            if (n.Contains("thorny") || n.Contains("bush")) { plantKind = 19; return true; }
+            if (n.Contains("fento") || n.Contains("fern")) { plantKind = 10; return true; }
+            cur = cur.parent;
+        }
+        return false;
     }
 
     private void DegradeEquippedTool()
@@ -236,7 +504,9 @@ public class ChoppingAndCombatSystem : MonoBehaviour
                 n.IndexOf("workbench", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
                 n.IndexOf("cauldron", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
                 n.IndexOf("campfire", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
-                n.IndexOf("shelter", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                n.IndexOf("shelter", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                n.IndexOf("roundhouse", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                n.IndexOf("blueprint", System.StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 return false;
             }
@@ -261,21 +531,30 @@ public class ChoppingAndCombatSystem : MonoBehaviour
 
     private void HandleLivingTargetFeedback(Vector3 hitPos, Vector3 normal, float actualDamage, bool parryCrit, bool isHeavy, bool killed, bool isShadow)
     {
-        if (audioSource != null && hitFleshClip != null)
+        HandleLivingTargetFeedback(hitPos, normal, actualDamage, parryCrit, isHeavy, killed, isShadow, false);
+    }
+
+    private void HandleLivingTargetFeedback(Vector3 hitPos, Vector3 normal, float actualDamage, bool parryCrit, bool isHeavy, bool killed, bool isShadow, bool isStealthCrit)
+    {
+        if (AudioManager.Instance != null)
+        {
+            AudioManager.Instance.PlayFoley(isShadow ? AudioManager.FoleyEventType.HitShadow : AudioManager.FoleyEventType.HitFlesh, hitPos, isShadow ? 0.78f : 0.88f, isShadow ? 0.84f : 0.92f, 1.12f);
+        }
+        else if (audioSource != null && hitFleshClip != null)
         {
             audioSource.pitch = isShadow ? Random.Range(0.72f, 0.88f) : Random.Range(0.92f, 1.12f);
             audioSource.PlayOneShot(hitFleshClip, isShadow ? 0.72f : 0.90f);
         }
 
         if (FirstPersonCamera.Instance != null)
-            FirstPersonCamera.Instance.AddShake(parryCrit ? 0.22f : (isHeavy ? 0.15f : 0.09f));
+            FirstPersonCamera.Instance.AddShake((parryCrit || isStealthCrit) ? 0.22f : (isHeavy ? 0.15f : 0.09f));
 
         if (GameFeelManager.Instance != null)
-            GameFeelManager.Instance.TriggerHitstop(parryCrit || killed ? 0.055f : (isHeavy ? 0.042f : 0.028f), 0.09f);
+            GameFeelManager.Instance.TriggerHitstop((parryCrit || isStealthCrit || killed) ? 0.055f : (isHeavy ? 0.042f : 0.028f), 0.09f);
 
         if (hapticCache != null)
         {
-            if (killed || parryCrit) hapticCache.TriggerHeavyVibration();
+            if (killed || parryCrit || isStealthCrit) hapticCache.TriggerHeavyVibration();
             else hapticCache.TriggerLightVibration();
         }
 
@@ -288,13 +567,17 @@ public class ChoppingAndCombatSystem : MonoBehaviour
 
         if (HUDSurvivalOverlay.Instance != null)
         {
-            HUDSurvivalOverlay.Instance.TriggerHitMarker(isCrit: parryCrit || isHeavy, isKill: killed);
+            HUDSurvivalOverlay.Instance.TriggerHitMarker(isCrit: parryCrit || isStealthCrit || isHeavy, isKill: killed);
 
             if (killed)
             {
                 HUDSurvivalOverlay.Instance.ShowLootTooltip(isShadow
                     ? "<color=#BB88FF>Vulto dissipado na escuridao!</color>"
                     : "<color=#55FF88>Presa abatida!</color>");
+            }
+            else if (isStealthCrit)
+            {
+                HUDSurvivalOverlay.Instance.ShowLootTooltip($"<color=#44FFCC>EMBOSCADA FURTIVA! ({actualDamage:F0} Dano)</color>");
             }
             else if (parryCrit)
             {
@@ -310,72 +593,494 @@ public class ChoppingAndCombatSystem : MonoBehaviour
     private bool TryFindBestHit(Ray ray, float range, out RaycastHit bestHit)
     {
         bestHit = default;
-        float minDist = float.MaxValue;
-        bool found = false;
+        float minHarvestOrEnemyDist = float.MaxValue;
+        RaycastHit bestHarvestOrEnemy = default;
+        bool foundHarvestOrEnemy = false;
 
-        int count = Physics.SphereCastNonAlloc(ray, attackRadius, hitBuffer, range, ~0, QueryTriggerInteraction.Ignore);
+        float minNonTerrainDist = float.MaxValue;
+        RaycastHit bestNonTerrain = default;
+        bool foundNonTerrain = false;
+
+        float minTerrainDist = float.MaxValue;
+        RaycastHit bestTerrain = default;
+        bool foundTerrain = false;
+
+        int count = Physics.SphereCastNonAlloc(ray, attackRadius, hitBuffer, range + 0.65f, ~0, QueryTriggerInteraction.Collide);
         for (int i = 0; i < count; i++)
         {
             Collider c = hitBuffer[i].collider;
             if (c == null || c.transform == transform || c.transform.IsChildOf(transform)) continue;
-            if (hitBuffer[i].distance < minDist)
+
+            bool isTreeOrLog = IsTreeCollider(c) || IsFallenLogCollider(c);
+            bool isRock = IsRockCollider(c);
+            bool isPlant = IsHarvestablePlantCollider(c, out _);
+            bool isBlueprint = c.GetComponentInParent<WorldBlueprintSite>() != null;
+            bool isEnemy = c.GetComponentInParent<WildlifeAIEngine>() != null || c.GetComponentInParent<BossSystem>() != null;
+            bool isPickup = c.GetComponent<ResourcePickup>() != null;
+
+            if (c.isTrigger && !isPickup && !isPlant && !isTreeOrLog && !isBlueprint)
+                continue;
+
+            bool isTerrain = c.gameObject.name.IndexOf("terrain", System.StringComparison.OrdinalIgnoreCase) >= 0;
+            if (isTerrain)
             {
-                minDist = hitBuffer[i].distance;
-                bestHit = hitBuffer[i];
-                found = true;
+                if (hitBuffer[i].distance < minTerrainDist)
+                {
+                    minTerrainDist = hitBuffer[i].distance;
+                    bestTerrain = hitBuffer[i];
+                    foundTerrain = true;
+                }
+            }
+            else if (isTreeOrLog || isRock || isEnemy || isBlueprint)
+            {
+                if (hitBuffer[i].distance < minHarvestOrEnemyDist)
+                {
+                    minHarvestOrEnemyDist = hitBuffer[i].distance;
+                    bestHarvestOrEnemy = hitBuffer[i];
+                    foundHarvestOrEnemy = true;
+                }
+            }
+            else
+            {
+                if (hitBuffer[i].distance < minNonTerrainDist)
+                {
+                    minNonTerrainDist = hitBuffer[i].distance;
+                    bestNonTerrain = hitBuffer[i];
+                    foundNonTerrain = true;
+                }
             }
         }
 
-        if (found) return true;
+        if (foundHarvestOrEnemy)
+        {
+            bestHit = bestHarvestOrEnemy;
+            return true;
+        }
 
-        count = Physics.RaycastNonAlloc(ray, hitBuffer, range + 0.25f, ~0, QueryTriggerInteraction.Ignore);
+        // Fallback de Proximidade Frontal (OverlapSphere): caso o jogador esteja muito colado ao tronco da arvore, rocha ou blueprint
+        // (onde o SphereCast da Unity ignora colliders que ja contem a origem do raio!)
+        Vector3 probeCenter = ray.origin + ray.direction * 1.65f;
+        int nearCount = Physics.OverlapSphereNonAlloc(probeCenter, 1.80f, nearBuffer, ~0, QueryTriggerInteraction.Collide);
+        Collider bestOverlapCol = null;
+        float bestOverlapScore = float.MaxValue;
+        Vector3 bestOverlapPoint = probeCenter;
+
+        for (int i = 0; i < nearCount; i++)
+        {
+            Collider c = nearBuffer[i];
+            if (c == null || c.transform == transform || c.transform.IsChildOf(transform)) continue;
+            if (c.gameObject.name.IndexOf("terrain", System.StringComparison.OrdinalIgnoreCase) >= 0) continue;
+
+            bool isTreeOrLog = IsTreeCollider(c) || IsFallenLogCollider(c);
+            bool isRock = IsRockCollider(c);
+            bool isBlueprint = c.GetComponentInParent<WorldBlueprintSite>() != null;
+            bool isEnemy = c.GetComponentInParent<WildlifeAIEngine>() != null || c.GetComponentInParent<BossSystem>() != null;
+            bool isPlant = IsHarvestablePlantCollider(c, out _);
+
+            if (!isTreeOrLog && !isRock && !isBlueprint && !isEnemy && !isPlant) continue;
+
+            Vector3 closestPt = c.ClosestPoint(ray.origin);
+            Vector3 toPt = closestPt - ray.origin;
+            float dist = toPt.magnitude;
+            float align = dist > 0.15f ? Vector3.Dot(ray.direction, toPt / dist) : 1f;
+            if (align < -0.25f) continue;
+
+            float priorityBonus = (isTreeOrLog || isRock || isEnemy) ? -0.8f : 0f;
+            float score = dist - (align * 1.5f) + priorityBonus;
+            if (score < bestOverlapScore)
+            {
+                bestOverlapScore = score;
+                bestOverlapCol = c;
+                bestOverlapPoint = closestPt;
+            }
+        }
+
+        if (bestOverlapCol != null)
+        {
+            // Constroi um RaycastHit valido ou faz um Raycast curto em direcao ao collider encontrado
+            Vector3 dirToCol = (bestOverlapCol.bounds.center - ray.origin);
+            if (dirToCol.sqrMagnitude > 0.001f && bestOverlapCol.Raycast(new Ray(ray.origin - dirToCol.normalized * 0.5f, dirToCol.normalized), out RaycastHit directHit, range + 2.5f))
+            {
+                bestHit = directHit;
+                return true;
+            }
+            if (foundNonTerrain)
+            {
+                bestHit = bestNonTerrain;
+                return true;
+            }
+            // Executa colheita direta para o collider sobreposto
+            ProcessOverlapColliderDirectly(bestOverlapCol, bestOverlapPoint);
+            return false;
+        }
+
+        if (foundNonTerrain)
+        {
+            bestHit = bestNonTerrain;
+            return true;
+        }
+
+        if (foundTerrain)
+        {
+            bestHit = bestTerrain;
+            return true;
+        }
+
+        count = Physics.RaycastNonAlloc(ray, hitBuffer, range + 0.65f, ~0, QueryTriggerInteraction.Collide);
         for (int i = 0; i < count; i++)
         {
             Collider c = hitBuffer[i].collider;
             if (c == null || c.transform == transform || c.transform.IsChildOf(transform)) continue;
-            if (hitBuffer[i].distance < minDist)
+            if (c.isTrigger && c.GetComponent<ResourcePickup>() == null && !IsHarvestablePlantCollider(c, out _) && !IsFallenLogCollider(c))
+                continue;
+
+            if (hitBuffer[i].distance < minTerrainDist)
             {
-                minDist = hitBuffer[i].distance;
+                minTerrainDist = hitBuffer[i].distance;
                 bestHit = hitBuffer[i];
-                found = true;
+                foundTerrain = true;
             }
         }
-        return found;
+        return foundTerrain;
     }
 
-    private void ProcessHit(RaycastHit hit, int weaponId, float damage, bool isHeavy, float treeMult, float rockMult)
+    private void ProcessOverlapColliderDirectly(Collider col, Vector3 hitPoint)
     {
-        Collider col = hit.collider;
         if (col == null) return;
+        if (inventory == null) inventory = InventoryAdvanced.Instance;
 
-        string colName = col.gameObject.name.ToLower();
-        string rootName = col.transform.root.gameObject.name.ToLower();
-
-        bool isTree = !colName.Contains("stump") && (
-                      colName.Contains("tree") || colName.Contains("trunk") || colName.Contains("foliage") ||
-                      rootName.Contains("tree") || rootName.Contains("pine") || rootName.Contains("arvore") ||
-                      col.GetComponentInParent<GalicianProceduralTreeGenerator>() != null);
-
-        bool isRock = !isTree && IsRockCollider(col);
-
-        if (isTree)
+        WorldBlueprintSite bp = col.GetComponentInParent<WorldBlueprintSite>();
+        if (bp != null)
         {
+            bp.TryDepositResource(gameObject);
+            return;
+        }
+
+        if (IsTreeCollider(col))
+        {
+            if (!EnsureAxeEquipped(inventory, true))
+            {
+                ShowToolRequiredForWoodWarning();
+                return;
+            }
+            ItemData wd = ItemDatabase.GetItem(inventory.equippedMainHandId);
+            float tm = wd != null ? Mathf.Max(2.0f, wd.harvestTreeMultiplier) : 2.2f;
             GameObject singleTree = FindSpecificTreeObject(col);
             if (singleTree != null)
             {
-                HandleTreeChop(hit, singleTree, treeMult, isHeavy);
+                HandleTreeChopAtPoint(hitPoint, Vector3.up, singleTree, tm, false);
                 DegradeEquippedTool();
             }
+            return;
         }
-        else if (isRock)
+
+        if (IsFallenLogCollider(col))
         {
-            HandleRockStrike(hit, rockMult, isHeavy);
+            if (!EnsureAxeEquipped(inventory, true))
+            {
+                ShowToolRequiredForWoodWarning();
+                return;
+            }
+            ItemData wd = ItemDatabase.GetItem(inventory.equippedMainHandId);
+            float tm = wd != null ? Mathf.Max(2.0f, wd.harvestTreeMultiplier) : 2.2f;
+            HarvestFallenLogCollider(col, hitPoint, tm);
+            return;
+        }
+
+        if (IsRockCollider(col))
+        {
+            if (!EnsureRockToolEquipped(inventory, true))
+            {
+                ShowToolRequiredForRockWarning();
+                return;
+            }
+            ItemData wd = ItemDatabase.GetItem(inventory.equippedMainHandId);
+            float rm = wd != null ? Mathf.Max(1.6f, wd.harvestRockMultiplier) : 1.6f;
+            HandleRockStrikeAtPoint(col, hitPoint, Vector3.up, rm, false);
             DegradeEquippedTool();
+            return;
         }
-        else
+
+        if (IsHarvestablePlantCollider(col, out int plantKind))
         {
-            HandleEntityStrike(hit, weaponId, damage, isHeavy);
+            HarvestPlantObject(col, plantKind, hitPoint);
         }
+    }
+
+    private void ProcessHit(RaycastHit hit, int weaponId, float damage, bool isHeavy, float treeMult, float rockMult, bool fromRightMouse)
+    {
+        Collider col = hit.collider;
+        if (col == null) return;
+        if (inventory == null) inventory = InventoryAdvanced.Instance;
+
+        // 0. Se bateu em um Blueprint de Construcao (ex: Cabana de Toras / Refugio), deposita os recursos na obra!
+        WorldBlueprintSite bpSite = col.GetComponentInParent<WorldBlueprintSite>();
+        if (bpSite != null)
+        {
+            bpSite.TryDepositResource(gameObject);
+            return;
+        }
+
+        // 1. Se clicou em um ResourcePickup no chao (Pedra Solta, Galho Solto): coleta manual!
+        ResourcePickup pickup = col.GetComponent<ResourcePickup>() ?? col.GetComponentInParent<ResourcePickup>();
+        if (pickup != null && inventory != null)
+        {
+            if (!col.gameObject.name.ToLower().Contains("felled_wood_log"))
+            {
+                int leftover = inventory.AddItem(pickup.itemID, pickup.amount);
+                int collected = pickup.amount - leftover;
+                if (collected > 0)
+                {
+                    ItemData d = ItemDatabase.GetItem(pickup.itemID);
+                    int totalNow = inventory.GetItemCount(pickup.itemID);
+                    if (HUDSurvivalOverlay.Instance != null)
+                    {
+                        HUDSurvivalOverlay.Instance.TriggerHitMarker(isCrit: false, isKill: false);
+                        HUDSurvivalOverlay.Instance.ShowLootTooltip($"+{collected} {(d != null ? d.itemName : "Item")} coletado (Total na Mochila: {totalNow})");
+                    }
+                    if (AudioManager.Instance != null)
+                        AudioManager.Instance.PlayPickupSoundForItem(pickup.itemID, pickup.transform.position);
+                    if (FirstPersonViewmodelController.Instance != null)
+                        FirstPersonViewmodelController.Instance.TriggerGatherAnimation();
+                }
+
+                if (leftover > 0)
+                {
+                    pickup.amount = leftover;
+                    if (HUDSurvivalOverlay.Instance != null)
+                        HUDSurvivalOverlay.Instance.ShowLootTooltip("Mochila cheia!");
+                }
+                else
+                {
+                    pickup.CompleteManualCollect();
+                }
+                return;
+            }
+        }
+
+        // 2. Arvore: EXIGE Machado (300 ou 312) — aceita TANTO Clique Esquerdo quanto Clique Direito!
+        if (IsTreeCollider(col))
+        {
+            if (!EnsureAxeEquipped(inventory, true))
+            {
+                ShowToolRequiredForWoodWarning();
+                return;
+            }
+
+            ItemData eqData = ItemDatabase.GetItem(inventory.equippedMainHandId);
+            float effectiveTreeMult = eqData != null ? Mathf.Max(2.0f, eqData.harvestTreeMultiplier) : Mathf.Max(2.0f, treeMult);
+
+            GameObject singleTree = FindSpecificTreeObject(col);
+            if (singleTree != null)
+            {
+                HandleTreeChop(hit, singleTree, effectiveTreeMult, isHeavy);
+                DegradeEquippedTool();
+            }
+            return;
+        }
+
+        // 3. Rocha / Pedra Mineravel: EXIGE Machado (300/312) ou Picareta (301) — aceita TANTO Clique Esquerdo quanto Clique Direito!
+        if (IsRockCollider(col))
+        {
+            if (!EnsureRockToolEquipped(inventory, true))
+            {
+                ShowToolRequiredForRockWarning();
+                return;
+            }
+
+            ItemData eqData = ItemDatabase.GetItem(inventory.equippedMainHandId);
+            float effectiveRockMult = eqData != null ? Mathf.Max(1.6f, eqData.harvestRockMultiplier) : Mathf.Max(1.6f, rockMult);
+
+            HandleRockStrike(hit, effectiveRockMult, isHeavy);
+            DegradeEquippedTool();
+            return;
+        }
+
+        // 4. Tronco Caido: EXIGE Machado (300/312) — aceita TANTO Clique Esquerdo quanto Clique Direito!
+        if (IsFallenLogCollider(col))
+        {
+            if (!EnsureAxeEquipped(inventory, true))
+            {
+                ShowToolRequiredForWoodWarning();
+                return;
+            }
+
+            ItemData eqData = ItemDatabase.GetItem(inventory.equippedMainHandId);
+            float effectiveTreeMult = eqData != null ? Mathf.Max(2.0f, eqData.harvestTreeMultiplier) : Mathf.Max(2.0f, treeMult);
+            HarvestFallenLogCollider(col, hit.point, effectiveTreeMult);
+            return;
+        }
+
+        // 5. Arbustos, Samambaias (Fentos), Bagas e Cogumelos (podem ser colhidos sem ferramenta!)
+        if (IsHarvestablePlantCollider(col, out int plantKind))
+        {
+            HarvestPlantObject(col, plantKind, hit.point);
+            return;
+        }
+
+        // 6. Entidades vivas, estruturas ou terreno
+        HandleEntityStrike(hit, weaponId, damage, isHeavy);
+    }
+
+    public void HarvestFallenLogCollider(Collider col, Vector3 hitPoint, float treeMult)
+    {
+        if (col == null) return;
+        if (inventory == null) inventory = InventoryAdvanced.Instance;
+
+        if (!EnsureAxeEquipped(inventory, true))
+        {
+            ShowToolRequiredForWoodWarning();
+            return;
+        }
+
+        if (AudioManager.Instance != null)
+        {
+            AudioManager.Instance.PlayFoley(AudioManager.FoleyEventType.ChopWood, hitPoint, 0.84f, 0.90f, 1.12f);
+        }
+        else if (audioSource != null && chopWoodClip != null)
+        {
+            audioSource.pitch = Random.Range(0.90f, 1.12f);
+            audioSource.PlayOneShot(chopWoodClip, 0.85f);
+        }
+        if (FirstPersonViewmodelController.Instance != null)
+            FirstPersonViewmodelController.Instance.TriggerImpactBounce(0.90f);
+        SpawnWoodChipsVFX(hitPoint, Vector3.up);
+        int logWood = treeMult >= 2.8f ? 3 : 2;
+        AddOrDrop(100, logWood, hitPoint);
+        bool gotResin = Random.value < 0.45f;
+        if (gotResin) AddOrDrop(119, 1, hitPoint);
+        int totalWood = inventory != null ? inventory.GetItemCount(100) : logWood;
+        if (HUDSurvivalOverlay.Instance != null)
+        {
+            HUDSurvivalOverlay.Instance.TriggerHitMarker(isCrit: false, isKill: true);
+            HUDSurvivalOverlay.Instance.ShowLootTooltip(gotResin
+                ? $"+{logWood} Madeira (Total: {totalWood}), +1 Resina [Tronco Cortado]"
+                : $"+{logWood} Madeira (Total: {totalWood}) [Tronco Cortado]");
+        }
+
+        GameObject logObj = FindSpecificPropObject(col);
+        if (mapRendererCache == null) mapRendererCache = FindAnyObjectByType<MapRenderer>();
+        if (mapRendererCache != null && logObj != null)
+        {
+            int gx = Mathf.RoundToInt(logObj.transform.position.x);
+            int gz = Mathf.RoundToInt(logObj.transform.position.z);
+            mapRendererCache.RemoveInstanceAt(gx, gz, 18);
+        }
+        if (logObj != null) Destroy(logObj);
+        DegradeEquippedTool();
+    }
+
+    public void HarvestPlantObject(Collider col, int plantKind, Vector3 hitPos)
+    {
+        if (inventory == null) inventory = InventoryAdvanced.Instance;
+        if (inventory == null || col == null) return;
+
+        GameObject plantObj = FindSpecificPropObject(col);
+        Vector3 pos = plantObj != null ? plantObj.transform.position : hitPos;
+        int gx = Mathf.RoundToInt(pos.x);
+        int gz = Mathf.RoundToInt(pos.z);
+
+        if (VFXPoolManager.Instance != null)
+            VFXPoolManager.Instance.PlayBuildPlaceVFX(pos + Vector3.up * 0.35f);
+        if (AudioManager.Instance != null)
+            AudioManager.Instance.PlayFoley(AudioManager.FoleyEventType.PickupHerb, pos, 0.72f);
+        if (FirstPersonViewmodelController.Instance != null)
+            FirstPersonViewmodelController.Instance.TriggerImpactBounce(0.55f);
+
+        bool hasKnife = inventory.equippedMainHandId == 302;
+        string bonusTag = hasKnife ? " [Bonus Faca]" : string.Empty;
+        if (hasKnife) AddOrDrop(103, 1, pos);
+
+        if (plantKind == 9) // Arbusto de Bagas
+        {
+            AddOrDrop(202, 2, pos);
+            AddOrDrop(103, 1, pos);
+            bool gotSeed = Random.value < 0.45f;
+            if (gotSeed) AddOrDrop(112, 1, pos);
+            int totalHerbs = inventory.GetItemCount(103);
+            int totalBerries = inventory.GetItemCount(202);
+            if (HUDSurvivalOverlay.Instance != null)
+            {
+                HUDSurvivalOverlay.Instance.TriggerHitMarker(isCrit: false, isKill: true);
+                HUDSurvivalOverlay.Instance.ShowLootTooltip(gotSeed
+                    ? $"+2 Bagas ({totalBerries}), +{(hasKnife ? 2 : 1)} Ervas ({totalHerbs}), +1 Semente{bonusTag}"
+                    : $"+2 Bagas ({totalBerries}), +{(hasKnife ? 2 : 1)} Ervas (Total Ervas: {totalHerbs}){bonusTag}");
+            }
+        }
+        else if (plantKind == 19) // Arbusto Espinhoso -> Ervas (Fibra)
+        {
+            AddOrDrop(103, 2, pos);
+            int totalHerbs = inventory.GetItemCount(103);
+            if (HUDSurvivalOverlay.Instance != null)
+            {
+                HUDSurvivalOverlay.Instance.TriggerHitMarker(isCrit: false, isKill: true);
+                HUDSurvivalOverlay.Instance.ShowLootTooltip($"+{(hasKnife ? 3 : 2)} Ervas Medicinais / Fibra (Total na Mochila: {totalHerbs}){bonusTag}");
+            }
+        }
+        else if (plantKind == 20) // Cogumelo Luminoso
+        {
+            AddOrDrop(203, 1, pos);
+            AddOrDrop(103, 1, pos);
+            int totalHerbs = inventory.GetItemCount(103);
+            if (HUDSurvivalOverlay.Instance != null)
+            {
+                HUDSurvivalOverlay.Instance.TriggerHitMarker(isCrit: false, isKill: true);
+                HUDSurvivalOverlay.Instance.ShowLootTooltip($"+1 Cogumelo, +{(hasKnife ? 2 : 1)} Ervas (Total Ervas: {totalHerbs}){bonusTag}");
+            }
+        }
+        else // Fento / Samambaia / Cogumelo comum
+        {
+            string lower = (plantObj != null ? plantObj.name : col.gameObject.name).ToLower();
+            if (lower.Contains("mushroom"))
+            {
+                AddOrDrop(203, 1, pos);
+                AddOrDrop(103, 1, pos);
+                int totalHerbs = inventory.GetItemCount(103);
+                if (HUDSurvivalOverlay.Instance != null)
+                {
+                    HUDSurvivalOverlay.Instance.TriggerHitMarker(isCrit: false, isKill: true);
+                    HUDSurvivalOverlay.Instance.ShowLootTooltip($"+1 Cogumelo, +{(hasKnife ? 2 : 1)} Ervas (Total Ervas: {totalHerbs}){bonusTag}");
+                }
+            }
+            else
+            {
+                AddOrDrop(103, 2, pos);
+                bool gotSeed = Random.value < 0.40f;
+                if (gotSeed) AddOrDrop(112, 1, pos);
+                int totalHerbs = inventory.GetItemCount(103);
+                if (HUDSurvivalOverlay.Instance != null)
+                {
+                    HUDSurvivalOverlay.Instance.TriggerHitMarker(isCrit: false, isKill: true);
+                    HUDSurvivalOverlay.Instance.ShowLootTooltip(gotSeed
+                        ? $"+{(hasKnife ? 3 : 2)} Ervas (Total: {totalHerbs}), +1 Sementes Silvestres{bonusTag}"
+                        : $"+{(hasKnife ? 3 : 2)} Ervas / Fibra p/ Corda (Total na Mochila: {totalHerbs}){bonusTag}");
+                }
+            }
+        }
+
+        if (mapRendererCache == null) mapRendererCache = FindAnyObjectByType<MapRenderer>();
+        if (mapRendererCache != null)
+        {
+            mapRendererCache.RemoveInstanceAt(gx, gz, plantKind);
+        }
+        if (plantObj != null)
+        {
+            Destroy(plantObj);
+        }
+    }
+
+    public GameObject FindSpecificPropObject(Collider col)
+    {
+        if (col == null) return null;
+        Transform cur = col.transform;
+        while (cur != null && cur.parent != null)
+        {
+            string pName = cur.parent.name.ToLower();
+            if (pName.StartsWith("chunk_") || pName.Contains("environment") || pName.Contains("landmarks") || cur.parent == cur.root)
+                return cur.gameObject;
+            cur = cur.parent;
+        }
+        return col.gameObject;
     }
 
     private GameObject FindSpecificTreeObject(Collider col)
@@ -385,26 +1090,21 @@ public class ChoppingAndCombatSystem : MonoBehaviour
         GalicianProceduralTreeGenerator gen = col.GetComponentInParent<GalicianProceduralTreeGenerator>();
         if (gen != null) return gen.gameObject;
 
-        if (mapRendererCache == null) mapRendererCache = FindAnyObjectByType<MapRenderer>();
-        Transform mapRoot = (mapRendererCache != null) ? mapRendererCache.transform : null;
-
-        Transform cur = col.transform;
-        while (cur != null && cur.parent != null)
-        {
-            if (cur.parent == mapRoot) return cur.gameObject;
-
-            string pName = cur.parent.name.ToLower();
-            if (pName.Contains("map") || pName.Contains("environment") || pName.Contains("scene") || cur.parent == cur.root)
-                return cur.gameObject;
-
-            cur = cur.parent;
-        }
-        return col.gameObject;
+        return FindSpecificPropObject(col);
     }
 
     private void HandleTreeChop(RaycastHit hit, GameObject treeRoot, float treeMult, bool isHeavy)
     {
-        if (audioSource != null && chopWoodClip != null)
+        HandleTreeChopAtPoint(hit.point, hit.normal, treeRoot, treeMult, isHeavy);
+    }
+
+    private void HandleTreeChopAtPoint(Vector3 hitPoint, Vector3 hitNormal, GameObject treeRoot, float treeMult, bool isHeavy)
+    {
+        if (AudioManager.Instance != null)
+        {
+            AudioManager.Instance.PlayFoley(AudioManager.FoleyEventType.ChopWood, hitPoint, 0.86f, 0.88f, 1.12f);
+        }
+        else if (audioSource != null && chopWoodClip != null)
         {
             audioSource.pitch = Random.Range(0.88f, 1.12f);
             audioSource.PlayOneShot(chopWoodClip, 0.85f);
@@ -416,28 +1116,37 @@ public class ChoppingAndCombatSystem : MonoBehaviour
         if (GameFeelManager.Instance != null)
             GameFeelManager.Instance.TriggerHitstop(isHeavy ? 0.045f : 0.025f, 0.12f);
 
+        if (FirstPersonViewmodelController.Instance != null)
+            FirstPersonViewmodelController.Instance.TriggerImpactBounce(isHeavy ? 1.30f : 0.95f);
+
         if (hapticCache != null) hapticCache.TriggerLightVibration();
-        SpawnWoodChipsVFX(hit.point, hit.normal);
+        SpawnWoodChipsVFX(hitPoint, hitNormal);
 
         int treeId = treeRoot.GetHashCode();
         if (!treeHitsRemaining.ContainsKey(treeId))
             treeHitsRemaining[treeId] = 4;
 
-        int chopPower = (treeMult >= 2.8f ? 3 : (treeMult >= 1.8f ? 2 : 1)) + (isHeavy ? 1 : 0);
+        int chopPower = (treeMult >= 2.8f ? 2 : 1) + (isHeavy ? 1 : 0);
         treeHitsRemaining[treeId] -= chopPower;
         int remaining = Mathf.Max(0, treeHitsRemaining[treeId]);
 
         int woodGained = treeMult >= 2.8f ? 2 : 1;
-        AddOrDrop(100, woodGained, hit.point);
+        AddOrDrop(100, woodGained, hitPoint);
 
-        bool gotResin = Random.value < (treeMult >= 1.8f ? 0.35f : 0.20f);
-        if (gotResin) AddOrDrop(119, 1, hit.point);
+        bool gotResin = Random.value < (treeMult >= 1.8f ? 0.35f : 0.22f);
+        if (gotResin) AddOrDrop(119, 1, hitPoint);
+
+        int totalWood = inventory != null ? inventory.GetItemCount(100) : woodGained;
 
         if (remaining <= 0)
         {
             treeHitsRemaining.Remove(treeId);
 
-            if (audioSource != null && treeFallClip != null)
+            if (AudioManager.Instance != null)
+            {
+                AudioManager.Instance.PlayFoley(AudioManager.FoleyEventType.TreeFall, treeRoot.transform.position, 0.95f, 0.94f, 1.05f, 36f);
+            }
+            else if (audioSource != null && treeFallClip != null)
             {
                 audioSource.pitch = Random.Range(0.95f, 1.05f);
                 audioSource.PlayOneShot(treeFallClip, 1.0f);
@@ -455,8 +1164,8 @@ public class ChoppingAndCombatSystem : MonoBehaviour
             {
                 HUDSurvivalOverlay.Instance.TriggerHitMarker(isCrit: false, isKill: false);
                 HUDSurvivalOverlay.Instance.ShowLootTooltip(gotHerbs
-                    ? "Arvore derrubada! +1 Resina, +1 Ervas - Colete as toras"
-                    : "Arvore derrubada! +1 Resina - Colete as toras no chao");
+                    ? $"Arvore derrubada! +{woodGained} Madeira (Total: {totalWood}), +1 Resina, +1 Ervas"
+                    : $"Arvore derrubada! +{woodGained} Madeira (Total: {totalWood}), +1 Resina");
             }
 
             SpawnTreeStump(treePos);
@@ -467,6 +1176,7 @@ public class ChoppingAndCombatSystem : MonoBehaviour
 
             int gridX = Mathf.RoundToInt(treePos.x);
             int gridZ = Mathf.RoundToInt(treePos.z);
+            if (mapRendererCache == null) mapRendererCache = FindAnyObjectByType<MapRenderer>();
             if (mapRendererCache != null) mapRendererCache.RemoveInstanceAt(gridX, gridZ, 1);
 
             StartCoroutine(AnimateTreeFallAndDestroy(treeRoot, fallDir));
@@ -476,7 +1186,7 @@ public class ChoppingAndCombatSystem : MonoBehaviour
             if (HUDSurvivalOverlay.Instance != null)
             {
                 HUDSurvivalOverlay.Instance.TriggerHitMarker(isCrit: isHeavy, isKill: false);
-                HUDSurvivalOverlay.Instance.ShowLootTooltip($"+{woodGained} Madeira{(gotResin ? " +1 Resina" : "")} (Corte {4 - remaining}/4)");
+                HUDSurvivalOverlay.Instance.ShowLootTooltip($"+{woodGained} Madeira{(gotResin ? " +1 Resina" : "")} (Total Madeira: {totalWood}) [Corte {4 - remaining}/4]");
             }
 
             StartCoroutine(ShakeTreeTrunk(treeRoot.transform));
@@ -513,7 +1223,16 @@ public class ChoppingAndCombatSystem : MonoBehaviour
 
     private void HandleRockStrike(RaycastHit hit, float rockMult, bool isHeavy)
     {
-        if (audioSource != null && hitRockClip != null)
+        HandleRockStrikeAtPoint(hit.collider, hit.point, hit.normal, rockMult, isHeavy);
+    }
+
+    private void HandleRockStrikeAtPoint(Collider col, Vector3 hitPoint, Vector3 hitNormal, float rockMult, bool isHeavy)
+    {
+        if (AudioManager.Instance != null)
+        {
+            AudioManager.Instance.PlayFoley(AudioManager.FoleyEventType.StrikeRock, hitPoint, 0.82f, 0.92f, 1.14f);
+        }
+        else if (audioSource != null && hitRockClip != null)
         {
             audioSource.pitch = Random.Range(0.92f, 1.15f);
             audioSource.PlayOneShot(hitRockClip, 0.78f);
@@ -525,37 +1244,54 @@ public class ChoppingAndCombatSystem : MonoBehaviour
         if (GameFeelManager.Instance != null)
             GameFeelManager.Instance.TriggerHitstop(0.028f, 0.14f);
 
+        if (FirstPersonViewmodelController.Instance != null)
+            FirstPersonViewmodelController.Instance.TriggerImpactBounce(isHeavy ? 1.40f : 1.05f);
+
         if (hapticCache != null) hapticCache.TriggerLightVibration();
         if (VFXPoolManager.Instance != null)
-            VFXPoolManager.Instance.PlaySparkVFX(hit.point, hit.normal);
+            VFXPoolManager.Instance.PlaySparkVFX(hitPoint, hitNormal);
 
-        MineableRockNode node = hit.collider != null ? hit.collider.GetComponentInParent<MineableRockNode>() : null;
-        if (node != null && node.isPermanent && !node.TryConsumeStrike(out _, out int waitSec))
+        MineableRockNode node = col != null ? col.GetComponentInParent<MineableRockNode>() : null;
+        if (node != null && node.isPermanent)
         {
-            if (HUDSurvivalOverlay.Instance != null)
-                HUDSurvivalOverlay.Instance.ShowLootTooltip($"Monumento esgotado temporariamente - aguarde {waitSec}s");
-            return;
+            if (!node.TryConsumeStrike(out _, out int waitSec))
+            {
+                if (HUDSurvivalOverlay.Instance != null)
+                    HUDSurvivalOverlay.Instance.ShowLootTooltip($"Monumento esgotado temporariamente - aguarde {waitSec}s");
+                return;
+            }
+        }
+        else
+        {
+            if (resourceManagerCache == null) resourceManagerCache = FindAnyObjectByType<ResourceManager>();
+            if (resourceManagerCache != null)
+            {
+                bool depleted = resourceManagerCache.TryMineRockFromCombat(col, hitPoint, node, rockMult, isHeavy);
+                if (HUDSurvivalOverlay.Instance != null)
+                    HUDSurvivalOverlay.Instance.TriggerHitMarker(isCrit: rockMult >= 2.0f, isKill: depleted);
+                return;
+            }
         }
 
-        int stoneYield = rockMult >= 2.3f ? (isHeavy ? 3 : 2) : (rockMult >= 1.4f ? 2 : 1);
-        float ironChance = rockMult >= 2.0f ? 0.65f : 0.22f;
-        float saltChance = rockMult >= 2.0f ? 0.42f : 0.16f;
+        int stoneYield = rockMult >= 2.3f ? (isHeavy ? 3 : 2) : 2;
+        float ironChance = rockMult >= 2.0f ? 0.65f : 0.30f;
+        float saltChance = rockMult >= 2.0f ? 0.42f : 0.20f;
 
         bool gotIron = Random.value < ironChance;
         bool gotSalt = Random.value < saltChance;
 
-        AddOrDrop(101, stoneYield, hit.point);
-        if (gotIron) AddOrDrop(107, 1, hit.point);
-        if (gotSalt) AddOrDrop(106, 1, hit.point);
+        AddOrDrop(101, stoneYield, hitPoint);
+        if (gotIron) AddOrDrop(107, 1, hitPoint);
+        if (gotSalt) AddOrDrop(106, 1, hitPoint);
 
+        int totalStones = inventory != null ? inventory.GetItemCount(101) : stoneYield;
         if (HUDSurvivalOverlay.Instance != null)
         {
             HUDSurvivalOverlay.Instance.TriggerHitMarker(isCrit: rockMult >= 2.0f, isKill: false);
             string bonus = "";
             if (gotIron) bonus += ", +1 Ferro";
             if (gotSalt) bonus += ", +1 Sal";
-            string actionWord = rockMult <= 1.05f ? "lascada (Maos)" : "minerada";
-            HUDSurvivalOverlay.Instance.ShowLootTooltip($"+{stoneYield} Pedra{bonus} {actionWord}");
+            HUDSurvivalOverlay.Instance.ShowLootTooltip($"+{stoneYield} Pedra{bonus} (Total Pedras: {totalStones})");
         }
     }
 
@@ -572,8 +1308,27 @@ public class ChoppingAndCombatSystem : MonoBehaviour
     private void HandleEntityStrike(RaycastHit hit, int weaponId, float actualDamage, bool isHeavy)
     {
         bool parryCrit = false;
+        bool stealthCrit = false;
         WildlifeAIEngine wildlife = hit.collider.GetComponentInParent<WildlifeAIEngine>();
+        BossSystem boss = hit.collider.GetComponentInParent<BossSystem>();
         bool isTerrainOrGround = hit.collider.gameObject.name.ToLower().Contains("terrain");
+        bool isLivingEnemy = !isTerrainOrGround && (wildlife != null || boss != null);
+
+        if (isLivingEnemy && FragaStealthSystem.Instance != null && FragaStealthSystem.Instance.IsHidden)
+        {
+            actualDamage *= (weaponId == 302 ? 2.55f : 2.25f);
+            stealthCrit = true;
+        }
+
+        if (boss != null && inventory != null && inventory.equippedOffHandId == 303)
+        {
+            actualDamage *= 1.25f; // Bonus de fogo da tocha contra criaturas sombrias
+        }
+
+        if (weaponId == 311 && isLivingEnemy)
+        {
+            actualDamage *= 1.12f; // Clava de Osso aplica impacto contundente adicional
+        }
 
         if (!isTerrainOrGround && PlayerMeleeCombatDefense.Instance != null && PlayerMeleeCombatDefense.Instance.hasParryBonus)
         {
@@ -584,13 +1339,21 @@ public class ChoppingAndCombatSystem : MonoBehaviour
 
         if (isTerrainOrGround)
         {
-            if (audioSource != null && hitRockClip != null)
+            if (AudioManager.Instance != null)
+            {
+                AudioManager.Instance.PlayFoley(AudioManager.FoleyEventType.StrikeRock, hit.point, 0.36f, 0.65f, 0.82f);
+            }
+            else if (audioSource != null && hitRockClip != null)
             {
                 audioSource.pitch = Random.Range(0.65f, 0.82f);
                 audioSource.PlayOneShot(hitRockClip, 0.36f);
             }
             if (VFXPoolManager.Instance != null)
                 VFXPoolManager.Instance.PlayBuildPlaceVFX(hit.point);
+        }
+        else if (AudioManager.Instance != null)
+        {
+            AudioManager.Instance.PlayFoley(boss != null ? AudioManager.FoleyEventType.HitShadow : AudioManager.FoleyEventType.HitFlesh, hit.point, 0.85f, 0.90f, 1.10f);
         }
         else if (audioSource != null && hitFleshClip != null)
         {
@@ -599,14 +1362,22 @@ public class ChoppingAndCombatSystem : MonoBehaviour
         }
 
         if (FirstPersonCamera.Instance != null)
-            FirstPersonCamera.Instance.AddShake(parryCrit ? 0.22f : (isHeavy ? 0.15f : 0.09f));
+            FirstPersonCamera.Instance.AddShake((parryCrit || stealthCrit) ? 0.22f : (isHeavy ? 0.15f : 0.09f));
 
         if (!isTerrainOrGround && GameFeelManager.Instance != null)
-            GameFeelManager.Instance.TriggerHitstop(parryCrit || isHeavy ? 0.055f : 0.032f, 0.08f);
+            GameFeelManager.Instance.TriggerHitstop((parryCrit || stealthCrit || isHeavy) ? 0.055f : 0.032f, 0.08f);
+
+        if (!isTerrainOrGround && FirstPersonViewmodelController.Instance != null)
+            FirstPersonViewmodelController.Instance.TriggerImpactBounce((parryCrit || stealthCrit) ? 1.35f : (isHeavy ? 1.15f : 0.85f));
 
         if (VFXPoolManager.Instance != null)
         {
-            if (wildlife != null)
+            if (boss != null)
+            {
+                VFXPoolManager.Instance.PlayShadowHitVFX(hit.point);
+                VFXPoolManager.Instance.PlayBloodDecalVFX(hit.point, true);
+            }
+            else if (wildlife != null)
             {
                 VFXPoolManager.Instance.PlayBloodSplashVFX(hit.point, hit.normal);
                 VFXPoolManager.Instance.PlayBloodDecalVFX(hit.point, false);
@@ -617,16 +1388,26 @@ public class ChoppingAndCombatSystem : MonoBehaviour
 
         if (!isTerrainOrGround)
         {
-            hit.collider.SendMessageUpwards("TakeDamage", actualDamage, SendMessageOptions.DontRequireReceiver);
+            if (boss != null)
+            {
+                boss.TakeDamage(actualDamage);
+            }
+            else
+            {
+                hit.collider.SendMessageUpwards("TakeDamage", actualDamage, SendMessageOptions.DontRequireReceiver);
+            }
             DegradeEquippedTool();
 
             if (HUDSurvivalOverlay.Instance != null)
             {
-                bool killed = wildlife != null && wildlife.currentState == WildlifeAIEngine.AIState.Dead;
-                HUDSurvivalOverlay.Instance.TriggerHitMarker(isCrit: parryCrit || isHeavy, isKill: killed);
+                bool killed = (wildlife != null && wildlife.currentState == WildlifeAIEngine.AIState.Dead) ||
+                              (boss != null && !boss.IsActive);
+                HUDSurvivalOverlay.Instance.TriggerHitMarker(isCrit: parryCrit || stealthCrit || isHeavy, isKill: killed);
 
                 if (parryCrit)
                     HUDSurvivalOverlay.Instance.ShowLootTooltip($"<color=#55FFDD>CRITICO DE PARRY! ({actualDamage:F0} Dano)</color>");
+                else if (stealthCrit)
+                    HUDSurvivalOverlay.Instance.ShowLootTooltip($"<color=#44FFCC>EMBOSCADA FURTIVA! ({actualDamage:F0} Dano)</color>");
                 else if (isHeavy)
                     HUDSurvivalOverlay.Instance.ShowLootTooltip($"Golpe Pesado! ({actualDamage:F0} Dano)");
                 else if (weaponId == 302)
@@ -690,7 +1471,6 @@ public class ChoppingAndCombatSystem : MonoBehaviour
             yield return null;
         }
 
-        // Impacto no solo: rebote sutil + estilhacos + toras fisicas rolantes
         float bounceElapsed = 0f;
         while (bounceElapsed < 0.22f && treeObj != null)
         {
@@ -745,6 +1525,7 @@ public class ChoppingAndCombatSystem : MonoBehaviour
             ResourcePickup pickup = logObj.AddComponent<ResourcePickup>();
             pickup.itemID = 100;
             pickup.amount = 2;
+            pickup.disableAutoMagnet = true;
         }
     }
 
@@ -781,11 +1562,15 @@ public class ChoppingAndCombatSystem : MonoBehaviour
 
     private AudioClip GenerateChopWoodSound()
     {
-        int sr = 44100; int len = (int)(sr * 0.24f); float[] samples = new float[len];
+        int sr = 22050; int len = (int)(sr * 0.24f); float[] samples = new float[len];
+        uint seed = 55001u; float lp1 = 0f, lp2 = 0f;
         for (int i = 0; i < len; i++)
         {
             float t = (float)i / len;
-            samples[i] = (Mathf.Sin(2f * Mathf.PI * 110f * ((float)i / sr)) * Mathf.Exp(-18f * t) * 0.65f + Random.Range(-1f, 1f) * Mathf.Exp(-8f * t) * 0.45f) * 0.95f;
+            seed = seed * 1664525u + 1013904223u;
+            float w = ((seed >> 16) / 65535f) * 2f - 1f;
+            lp1 = Mathf.Lerp(lp1, w, 0.24f); lp2 = Mathf.Lerp(lp2, lp1, 0.06f);
+            samples[i] = Mathf.Clamp((Mathf.Sin(2f * Mathf.PI * 110f * ((float)i / sr)) * Mathf.Exp(-18f * t) * 0.65f + (lp1 - lp2) * Mathf.Exp(-9f * t) * 0.55f) * 0.95f, -1f, 1f);
         }
         AudioClip clip = AudioClip.Create("AxeChopWood_Procedural", len, 1, sr, false);
         clip.SetData(samples, 0);
@@ -794,12 +1579,16 @@ public class ChoppingAndCombatSystem : MonoBehaviour
 
     private AudioClip GenerateTreeFallSound()
     {
-        int sr = 44100; int len = (int)(sr * 1.25f); float[] samples = new float[len];
+        int sr = 22050; int len = (int)(sr * 1.25f); float[] samples = new float[len];
+        uint seed = 55009u; float lp1 = 0f, lp2 = 0f;
         for (int i = 0; i < len; i++)
         {
             float t = (float)i / len;
-            float crack = (t < 0.35f) ? Random.Range(-0.8f, 0.8f) * Mathf.Sin(t * 120f) : 0f;
-            float crash = (t >= 0.35f) ? Mathf.Sin(2f * Mathf.PI * 55f * ((float)i / sr)) * Mathf.Exp(-4f * (t - 0.35f)) : 0f;
+            seed = seed * 1664525u + 1013904223u;
+            float w = ((seed >> 16) / 65535f) * 2f - 1f;
+            lp1 = Mathf.Lerp(lp1, w, 0.22f); lp2 = Mathf.Lerp(lp2, lp1, 0.05f);
+            float crack = (t < 0.35f) ? (lp1 - lp2) * Mathf.Sin(t * 120f) * 0.9f : 0f;
+            float crash = (t >= 0.35f) ? (Mathf.Sin(2f * Mathf.PI * 55f * ((float)i / sr)) * 0.85f + lp2 * 0.35f) * Mathf.Exp(-4f * (t - 0.35f)) : 0f;
             samples[i] = Mathf.Clamp(crack * 0.7f + crash * 0.85f, -1f, 1f);
         }
         AudioClip clip = AudioClip.Create("TreeFall_Procedural", len, 1, sr, false);
@@ -809,11 +1598,15 @@ public class ChoppingAndCombatSystem : MonoBehaviour
 
     private AudioClip GenerateRockHitSound()
     {
-        int sr = 44100; int len = (int)(sr * 0.18f); float[] samples = new float[len];
+        int sr = 22050; int len = (int)(sr * 0.18f); float[] samples = new float[len];
+        uint seed = 55021u; float lp = 0f;
         for (int i = 0; i < len; i++)
         {
             float t = (float)i / len; float env = Mathf.Exp(-24f * t);
-            samples[i] = Mathf.Sin(2f * Mathf.PI * 720f * ((float)i / sr)) * env * 0.7f + Random.Range(-0.3f, 0.3f) * env;
+            seed = seed * 1664525u + 1013904223u;
+            float w = ((seed >> 16) / 65535f) * 2f - 1f;
+            lp = Mathf.Lerp(lp, w, 0.35f);
+            samples[i] = Mathf.Clamp(Mathf.Sin(2f * Mathf.PI * 720f * ((float)i / sr)) * env * 0.65f + (w - lp) * env * 0.45f, -1f, 1f);
         }
         AudioClip clip = AudioClip.Create("RockHit_Procedural", len, 1, sr, false);
         clip.SetData(samples, 0);
@@ -822,11 +1615,17 @@ public class ChoppingAndCombatSystem : MonoBehaviour
 
     private AudioClip GenerateSwingWhooshSound()
     {
-        int sr = 44100; int len = (int)(sr * 0.16f); float[] samples = new float[len];
+        int sr = 22050; int len = (int)(sr * 0.16f); float[] samples = new float[len];
+        uint seed = 55117u;
+        float lp1 = 0f, lp2 = 0f;
         for (int i = 0; i < len; i++)
         {
             float t = (float)i / len;
-            samples[i] = Random.Range(-1f, 1f) * Mathf.Sin(t * Mathf.PI) * 0.35f;
+            seed = seed * 1664525u + 1013904223u;
+            float w = ((seed >> 16) / 65535f) * 2f - 1f;
+            lp1 = Mathf.Lerp(lp1, w, 0.18f);
+            lp2 = Mathf.Lerp(lp2, lp1, 0.06f);
+            samples[i] = (lp1 - lp2) * Mathf.Sin(t * Mathf.PI) * 0.65f;
         }
         AudioClip clip = AudioClip.Create("AxeWhoosh_Procedural", len, 1, sr, false);
         clip.SetData(samples, 0);
@@ -835,11 +1634,15 @@ public class ChoppingAndCombatSystem : MonoBehaviour
 
     private AudioClip GenerateFleshHitSound()
     {
-        int sr = 44100; int len = (int)(sr * 0.14f); float[] samples = new float[len];
+        int sr = 22050; int len = (int)(sr * 0.14f); float[] samples = new float[len];
+        uint seed = 55033u; float lp = 0f;
         for (int i = 0; i < len; i++)
         {
             float t = (float)i / len; float env = Mathf.Exp(-16f * t);
-            samples[i] = (Mathf.Sin(2f * Mathf.PI * 140f * ((float)i / sr)) * 0.65f + Random.Range(-0.4f, 0.4f) * 0.35f) * env;
+            seed = seed * 1664525u + 1013904223u;
+            float w = ((seed >> 16) / 65535f) * 2f - 1f;
+            lp = Mathf.Lerp(lp, w, 0.18f);
+            samples[i] = Mathf.Clamp((Mathf.Sin(2f * Mathf.PI * 140f * ((float)i / sr)) * 0.65f + lp * 0.35f) * env, -1f, 1f);
         }
         AudioClip clip = AudioClip.Create("FleshHit_Procedural", len, 1, sr, false);
         clip.SetData(samples, 0);

@@ -1,23 +1,25 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 /// <summary>
-/// Controlador de Joystick Virtual Mobile Híbrido AAA (Padrão COD Mobile / Wild Rift / Genshin Impact).
+/// Controlador de Joystick Virtual Mobile Hibrido AAA (Padrao COD Mobile / Wild Rift / Genshin Impact).
 /// Suporta:
-/// - Modo Híbrido: Dynamic Floating Follow (acompanha o polegar para resposta instantânea ao virar), Fixo ou Centralizado.
-/// - Trava de Corrida (Sprint Lock): empurrar além do limite superior ativa corrida contínua sem cansar o polegar.
-/// - Isolamento de UI: não rouba toques de botões da interface (mochila, ataque, pulo).
-/// - Curva de resposta analógica cúbica para andar furtivo milimétrico e corrida firme.
-/// - Opacidade dinâmica (fade sutil quando ocioso, brilhante quando ativo).
+/// - Modo Hibrido: Dynamic Floating Follow (acompanha o polegar para resposta instantanea ao virar), Fixo ou Centralizado.
+/// - Trava de Corrida (Sprint Lock): empurrar alem do limite superior ou manter impulso total para frente ativa corrida continua.
+/// - Isolamento real de UI: raycast Zero-GC permite tocar na Joystick_TouchZone sem roubar toques de botoes da interface (Hotbar, Obra, Acao).
+/// - Conversao exata de coordenadas Screen -> AnchoredPosition independente de ancora/CanvasScaler.
 /// </summary>
 public class MobileInputController : MonoBehaviour, IPointerDownHandler, IPointerUpHandler, IDragHandler
 {
+    public static MobileInputController Instance { get; private set; }
+
     public enum JoystickType
     {
-        DynamicFloatingFollow, // Recomendado: base surge no polegar e acompanha o arrasto além do raio
-        Fixed,                 // Base fixa na posição padrão
-        DynamicCentering       // Base surge no toque e fica estática
+        DynamicFloatingFollow, // Recomendado: base surge no polegar e acompanha o arrasto alem do raio
+        Fixed,                 // Base fixa na posicao padrao
+        DynamicCentering       // Base surge no toque e fica estatica
     }
 
     [Header("Joystick Mode")]
@@ -32,19 +34,21 @@ public class MobileInputController : MonoBehaviour, IPointerDownHandler, IPointe
     public float joystickRadius = 75f;
     public float deadZone = 6f;
     public float sprintLockThresholdMultiplier = 1.35f;
+    public float sprintLockHoldDuration = 0.55f;
 
     [Header("Visual Feedback & Opacity")]
     public float idleAlpha = 0.35f;
     public float activeAlpha = 0.85f;
     public Color handleNormalColor = new Color(0.92f, 0.95f, 1.0f, 0.85f);
-    public Color handleSprintColor = new Color(0.30f, 0.95f, 1.0f, 1.0f);
-    public Color sprintLockActiveColor = new Color(0.30f, 1.0f, 0.60f, 1.0f);
+    public Color handleSprintColor = new Color(0.30f, 0.95f, 1.0f, 1f);
+    public Color sprintLockActiveColor = new Color(0.30f, 1.0f, 0.60f, 1f);
 
     private Vector2 inputVector = Vector2.zero;
     private bool isDragging = false;
     private int activeFingerId = -1;
     private Vector2 touchStartScreenPos;
-    private Vector2 defaultAnchoredPos;
+    private Vector2 dragOriginScreenPos;
+    private Vector2 defaultAnchoredPos = new Vector2(160f, 160f);
     private Canvas parentCanvas;
     private RectTransform parentRectTransform;
     private CanvasGroup joystickCanvasGroup;
@@ -55,15 +59,22 @@ public class MobileInputController : MonoBehaviour, IPointerDownHandler, IPointe
     private Text sprintIndicatorText;
 
     private bool isSprintLocked = false;
+    private float forwardSprintTimer = 0f;
+
+    private readonly List<RaycastResult> uiRaycastHits = new List<RaycastResult>(8);
+    private PointerEventData cachedPointerData;
 
     private static Sprite s_ringSprite;
     private static Sprite s_handleSprite;
     private static Sprite s_arrowSprite;
 
+    public bool IsDragging => isDragging;
+    public bool IsSprintLocked => isSprintLocked;
+
     /// <summary>
-    /// Retorna verdadeiro se o analógico estiver na faixa de corrida ou com Sprint Lock ativado.
+    /// Retorna verdadeiro se o analogico estiver na faixa de corrida ou com Sprint Lock ativado.
     /// </summary>
-    public bool IsSprinting => isSprintLocked || (inputVector.y > 0.62f && inputVector.magnitude > 0.80f);
+    public bool IsSprinting => isSprintLocked || (inputVector.y > 0.62f && inputVector.magnitude > 0.78f);
 
     public bool dynamicCentering
     {
@@ -79,6 +90,7 @@ public class MobileInputController : MonoBehaviour, IPointerDownHandler, IPointe
 
     private void Awake()
     {
+        if (Instance == null) Instance = this;
         LoadPreferences();
         FindCanvasAndVisuals();
     }
@@ -87,6 +99,11 @@ public class MobileInputController : MonoBehaviour, IPointerDownHandler, IPointe
     {
         FindCanvasAndVisuals();
         ConfigureVisualStyles();
+    }
+
+    private void OnDestroy()
+    {
+        if (Instance == this) Instance = null;
     }
 
     private void LoadPreferences()
@@ -106,12 +123,23 @@ public class MobileInputController : MonoBehaviour, IPointerDownHandler, IPointe
         joystickType = mode;
         PlayerPrefs.SetInt("Fraga_JoystickMode", (int)mode);
         PlayerPrefs.Save();
+        EndDrag();
+        if (joystickBackground != null && mode == JoystickType.Fixed)
+        {
+            joystickBackground.anchoredPosition = defaultAnchoredPos;
+        }
+    }
+
+    public void RefreshReferences()
+    {
+        FindCanvasAndVisuals();
+        ConfigureVisualStyles();
     }
 
     private void FindCanvasAndVisuals()
     {
         if (parentCanvas == null) parentCanvas = GetComponentInParent<Canvas>();
-        if (parentCanvas == null) parentCanvas = FindAnyObjectByType<Canvas>();
+        if (parentCanvas == null) parentCanvas = HUDSurvivalOverlay.GetGameplayCanvas();
 
         if (joystickBackground == null)
         {
@@ -122,12 +150,13 @@ public class MobileInputController : MonoBehaviour, IPointerDownHandler, IPointe
 
         if (joystickBackground != null)
         {
-            defaultAnchoredPos = joystickBackground.anchoredPosition;
-            if (defaultAnchoredPos.sqrMagnitude < 10f)
-            {
-                defaultAnchoredPos = new Vector2(160f, 160f);
-            }
+            Vector2 currentAnchor = joystickBackground.anchoredPosition;
+            defaultAnchoredPos = currentAnchor.sqrMagnitude < 10f ? new Vector2(160f, 160f) : currentAnchor;
             parentRectTransform = joystickBackground.parent as RectTransform;
+            if (parentRectTransform == null && parentCanvas != null)
+            {
+                parentRectTransform = parentCanvas.GetComponent<RectTransform>();
+            }
 
             joystickCanvasGroup = joystickBackground.GetComponent<CanvasGroup>();
             if (joystickCanvasGroup == null)
@@ -167,7 +196,6 @@ public class MobileInputController : MonoBehaviour, IPointerDownHandler, IPointe
                 bgImage.raycastTarget = false;
             }
 
-            // Criar ou estilizar o indicador de Sprint Lock se não existir
             if (sprintLockIndicator == null)
             {
                 GameObject lockObj = new GameObject("Sprint_Lock_Indicator");
@@ -184,7 +212,7 @@ public class MobileInputController : MonoBehaviour, IPointerDownHandler, IPointe
                 GameObject lockTextObj = new GameObject("Text");
                 lockTextObj.transform.SetParent(lockObj.transform, false);
                 RectTransform textRT = lockTextObj.AddComponent<RectTransform>();
-                textRT.sizeDelta = new Vector2(70, 20);
+                textRT.sizeDelta = new Vector2(88, 20);
                 textRT.anchoredPosition = new Vector2(0, 22);
 
                 sprintIndicatorText = lockTextObj.AddComponent<Text>();
@@ -218,46 +246,59 @@ public class MobileInputController : MonoBehaviour, IPointerDownHandler, IPointe
 
     private void Update()
     {
-        // 1. Processamento de Toques Mobile Multi-Touch
-        if (Input.touchCount > 0)
+        bool blockedByContext = FragaInputRouter.Instance != null &&
+                                (!FragaInputRouter.Instance.IsTouchControlsActive ||
+                                 (!FragaInputRouter.Instance.IsGameplayAllowed &&
+                                  FragaInputRouter.Instance.CurrentContext != FragaInputRouter.InputContext.BuildPlacement));
+
+        if (blockedByContext)
+        {
+            if (isDragging) EndDrag();
+        }
+        else if (Input.touchCount > 0)
         {
             ProcessNativeTouches();
         }
 
-        // 2. Transição suave de opacidade (sutil quando ocioso, destacado ao usar)
+        float dt = Time.unscaledDeltaTime;
+
+        // Transicao suave de opacidade
         if (joystickCanvasGroup != null)
         {
             float targetAlpha = isDragging ? activeAlpha : idleAlpha;
-            joystickCanvasGroup.alpha = Mathf.Lerp(joystickCanvasGroup.alpha, targetAlpha, Time.deltaTime * 12f);
+            joystickCanvasGroup.alpha = Mathf.Lerp(joystickCanvasGroup.alpha, targetAlpha, dt * 12f);
         }
 
-        // 3. Retorno elástico (Spring-back) do manípulo e base
+        // Retorno elastico (Spring-back) do manipulo e base
         if (!isDragging && joystickHandle != null)
         {
             if (joystickHandle.anchoredPosition.sqrMagnitude > 0.01f)
             {
-                joystickHandle.anchoredPosition = Vector2.Lerp(joystickHandle.anchoredPosition, Vector2.zero, Time.deltaTime * 24f);
+                joystickHandle.anchoredPosition = Vector2.Lerp(joystickHandle.anchoredPosition, Vector2.zero, dt * 24f);
             }
             if (joystickBackground != null && (joystickBackground.anchoredPosition - defaultAnchoredPos).sqrMagnitude > 0.1f)
             {
-                joystickBackground.anchoredPosition = Vector2.Lerp(joystickBackground.anchoredPosition, defaultAnchoredPos, Time.deltaTime * 10f);
+                joystickBackground.anchoredPosition = Vector2.Lerp(joystickBackground.anchoredPosition, defaultAnchoredPos, dt * 10f);
             }
         }
 
-        // 4. Feedback visual dinâmico do manípulo e do Sprint Lock
+        // Feedback visual dinamico do manipulo e do Sprint Lock
         if (handleImage != null)
         {
             Color targetCol = IsSprinting ? (isSprintLocked ? sprintLockActiveColor : handleSprintColor) : handleNormalColor;
-            handleImage.color = Color.Lerp(handleImage.color, targetCol, Time.deltaTime * 12f);
+            handleImage.color = Color.Lerp(handleImage.color, targetCol, dt * 12f);
         }
 
         if (sprintIndicatorImage != null)
         {
-            Color targetLockCol = isSprintLocked ? sprintLockActiveColor : (IsSprinting ? handleSprintColor : new Color(0.4f, 0.8f, 1.0f, 0.35f));
-            sprintIndicatorImage.color = Color.Lerp(sprintIndicatorImage.color, targetLockCol, Time.deltaTime * 12f);
+            Color targetLockCol = isSprintLocked
+                ? sprintLockActiveColor
+                : (IsSprinting ? handleSprintColor : new Color(0.4f, 0.8f, 1.0f, 0.35f));
+            sprintIndicatorImage.color = Color.Lerp(sprintIndicatorImage.color, targetLockCol, dt * 12f);
             if (sprintIndicatorText != null)
             {
                 sprintIndicatorText.color = sprintIndicatorImage.color;
+                sprintIndicatorText.text = isSprintLocked ? "TRAVA CORRER" : "CORRER";
             }
         }
     }
@@ -272,20 +313,12 @@ public class MobileInputController : MonoBehaviour, IPointerDownHandler, IPointe
             for (int i = 0; i < Input.touchCount; i++)
             {
                 Touch t = Input.GetTouch(i);
-                // Ignora se o toque estiver sobre botões de UI da esquerda (ex: menus suspensos)
-                if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject(t.fingerId))
-                {
-                    continue;
-                }
+                if (t.phase != TouchPhase.Began) continue;
+                if (t.position.x > maxLeftAreaX || t.position.y > maxLeftAreaY) continue;
+                if (IsTouchOverBlockingUI(t.position)) continue;
 
-                if (t.position.x <= maxLeftAreaX && t.position.y <= maxLeftAreaY)
-                {
-                    if (t.phase == TouchPhase.Began)
-                    {
-                        StartJoystickDrag(t.fingerId, t.position);
-                        break;
-                    }
-                }
+                BeginDragAt(t.fingerId, t.position);
+                break;
             }
         }
         else
@@ -299,11 +332,11 @@ public class MobileInputController : MonoBehaviour, IPointerDownHandler, IPointe
                     foundActiveFinger = true;
                     if (t.phase == TouchPhase.Moved || t.phase == TouchPhase.Stationary)
                     {
-                        UpdateJoystickPosition(t.position);
+                        UpdateDragAt(t.position);
                     }
                     else if (t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled)
                     {
-                        EndJoystickDrag();
+                        EndDrag();
                     }
                     break;
                 }
@@ -311,30 +344,111 @@ public class MobileInputController : MonoBehaviour, IPointerDownHandler, IPointe
 
             if (!foundActiveFinger)
             {
-                EndJoystickDrag();
+                EndDrag();
             }
         }
     }
 
-    private void StartJoystickDrag(int fingerId, Vector2 screenPos)
+    private bool IsTouchOverBlockingUI(Vector2 screenPos)
     {
+        EventSystem es = EventSystem.current;
+        if (es == null) return false;
+
+        if (cachedPointerData == null) cachedPointerData = new PointerEventData(es);
+        cachedPointerData.position = screenPos;
+        uiRaycastHits.Clear();
+        es.RaycastAll(cachedPointerData, uiRaycastHits);
+
+        for (int i = 0; i < uiRaycastHits.Count; i++)
+        {
+            GameObject hitGo = uiRaycastHits[i].gameObject;
+            if (hitGo == null || hitGo == gameObject) continue;
+            if (hitGo.name == "Joystick_TouchZone" || hitGo.name == "CameraTouchZone") continue;
+            if (joystickBackground != null && (hitGo == joystickBackground.gameObject || hitGo.transform.IsChildOf(joystickBackground))) continue;
+
+            return true;
+        }
+        return false;
+    }
+
+    private Camera GetUICamera()
+    {
+        return (parentCanvas != null && parentCanvas.renderMode != RenderMode.ScreenSpaceOverlay)
+            ? parentCanvas.worldCamera
+            : null;
+    }
+
+    private float GetCanvasScaleFactor()
+    {
+        return (parentCanvas != null && parentCanvas.scaleFactor > 0.01f) ? parentCanvas.scaleFactor : 1.0f;
+    }
+
+    private Vector2 ScreenToTargetAnchoredPos(Vector2 screenPos, out Vector2 unclampedAnchoredPos)
+    {
+        if (joystickBackground == null || parentRectTransform == null)
+        {
+            unclampedAnchoredPos = Vector2.zero;
+            return Vector2.zero;
+        }
+
+        Camera uiCam = GetUICamera();
+        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(parentRectTransform, screenPos, uiCam, out Vector2 localPoint))
+        {
+            unclampedAnchoredPos = joystickBackground.anchoredPosition;
+            return joystickBackground.anchoredPosition;
+        }
+
+        Rect r = parentRectTransform.rect;
+        if (r.width < 10f || r.height < 10f)
+        {
+            r = new Rect(-960f, -540f, 1920f, 1080f);
+        }
+
+        Vector2 anchorMid = (joystickBackground.anchorMin + joystickBackground.anchorMax) * 0.5f;
+        Vector2 anchorOrigin = new Vector2(r.xMin + r.width * anchorMid.x, r.yMin + r.height * anchorMid.y);
+
+        unclampedAnchoredPos = localPoint - anchorOrigin;
+        return ClampAnchoredToLeftZone(unclampedAnchoredPos, r, anchorOrigin);
+    }
+
+    private Vector2 ClampAnchoredToLeftZone(Vector2 anchoredPos, Rect parentRect, Vector2 anchorOrigin)
+    {
+        Vector2 localPoint = anchoredPos + anchorOrigin;
+        float pad = Mathf.Max(24f, joystickRadius + 14f);
+        float minX = parentRect.xMin + pad;
+        float maxX = Mathf.Max(minX, parentRect.xMin + parentRect.width * 0.46f - joystickRadius * 0.4f);
+        float minY = parentRect.yMin + pad;
+        float maxY = Mathf.Max(minY, parentRect.yMin + parentRect.height * 0.66f - joystickRadius * 0.4f);
+
+        localPoint.x = Mathf.Clamp(localPoint.x, minX, maxX);
+        localPoint.y = Mathf.Clamp(localPoint.y, minY, maxY);
+        return localPoint - anchorOrigin;
+    }
+
+    public void BeginDragAt(int fingerId, Vector2 screenPos)
+    {
+        if (parentRectTransform == null || joystickBackground == null) FindCanvasAndVisuals();
+
         activeFingerId = fingerId;
         isDragging = true;
+        isSprintLocked = false;
+        forwardSprintTimer = 0f;
+        dragOriginScreenPos = screenPos;
+
+        float scaleFactor = GetCanvasScaleFactor();
 
         if (joystickBackground != null && parentRectTransform != null)
         {
-            RectTransformUtility.ScreenPointToLocalPointInRectangle(parentRectTransform, screenPos, null, out Vector2 localPoint);
-
             if (joystickType == JoystickType.Fixed)
             {
                 joystickBackground.anchoredPosition = defaultAnchoredPos;
-                touchStartScreenPos = RectTransformUtility.WorldToScreenPoint(null, joystickBackground.position);
+                touchStartScreenPos = RectTransformUtility.WorldToScreenPoint(GetUICamera(), joystickBackground.position);
             }
             else
             {
-                // DynamicFloatingFollow ou DynamicCentering: Ancoragem sob o polegar
-                joystickBackground.anchoredPosition = localPoint;
-                touchStartScreenPos = screenPos;
+                Vector2 clamped = ScreenToTargetAnchoredPos(screenPos, out Vector2 unclamped);
+                joystickBackground.anchoredPosition = clamped;
+                touchStartScreenPos = screenPos + (clamped - unclamped) * scaleFactor;
             }
         }
         else
@@ -350,62 +464,93 @@ public class MobileInputController : MonoBehaviour, IPointerDownHandler, IPointe
         inputVector = Vector2.zero;
     }
 
-    private void UpdateJoystickPosition(Vector2 currentScreenPos)
+    public void UpdateDragAt(Vector2 currentScreenPos)
     {
-        Vector2 screenDelta = currentScreenPos - touchStartScreenPos;
-        float scaleFactor = (parentCanvas != null && parentCanvas.scaleFactor > 0.01f) ? parentCanvas.scaleFactor : 1.0f;
-        Vector2 canvasDelta = screenDelta / scaleFactor;
+        UpdateDragAt(currentScreenPos, Time.unscaledDeltaTime);
+    }
 
-        float distance = canvasDelta.magnitude;
+    public void UpdateDragAt(Vector2 currentScreenPos, float deltaTime)
+    {
+        float scaleFactor = GetCanvasScaleFactor();
+        Vector2 rawScreenDelta = currentScreenPos - touchStartScreenPos;
+        Vector2 rawCanvasDelta = rawScreenDelta / scaleFactor;
+        float rawDistance = rawCanvasDelta.magnitude;
 
-        // Zona morta para prevenir oscilação em repouso
-        if (distance < deadZone)
+        if (rawDistance < deadZone)
         {
-            inputVector = Vector2.zero;
+            inputVector = isSprintLocked ? new Vector2(0f, 1f) : Vector2.zero;
+            if (!isSprintLocked) forwardSprintTimer = 0f;
             if (joystickHandle != null) joystickHandle.anchoredPosition = Vector2.zero;
             return;
         }
 
-        Vector2 direction = canvasDelta / distance;
+        Vector2 direction = rawCanvasDelta / rawDistance;
 
-        // 1. Lógica Follow Thumb (COD Mobile / Wild Rift / Genshin):
-        // Se o polegar arrastar além do raio do analógico, a base desliza acompanhando o dedo!
-        if (joystickType == JoystickType.DynamicFloatingFollow && distance > joystickRadius)
-        {
-            Vector2 excessCanvas = canvasDelta - direction * joystickRadius;
-            if (joystickBackground != null)
-            {
-                joystickBackground.anchoredPosition += excessCanvas;
-                touchStartScreenPos = RectTransformUtility.WorldToScreenPoint(null, joystickBackground.position);
-                screenDelta = currentScreenPos - touchStartScreenPos;
-                canvasDelta = screenDelta / scaleFactor;
-                distance = joystickRadius;
-            }
-        }
-
-        // 2. Trava de Corrida (Sprint Lock)
+        // 1. Trava de Corrida (Sprint Lock): avaliada ANTES do Follow Thumb limitar o delta
         float sprintLockDist = joystickRadius * sprintLockThresholdMultiplier;
-        if (canvasDelta.y > sprintLockDist && Mathf.Abs(direction.x) < 0.45f)
+        float totalUpFromOrigin = (currentScreenPos.y - dragOriginScreenPos.y) / scaleFactor;
+        bool straightForwardPush = direction.y > 0.85f && Mathf.Abs(direction.x) < 0.45f;
+
+        if ((rawCanvasDelta.y > sprintLockDist || (joystickType == JoystickType.DynamicFloatingFollow && totalUpFromOrigin > sprintLockDist * 1.15f))
+            && Mathf.Abs(direction.x) < 0.45f)
         {
             isSprintLocked = true;
         }
-        else if (canvasDelta.y < -deadZone * 2f)
+        else if (joystickType == JoystickType.DynamicFloatingFollow && straightForwardPush && rawDistance >= joystickRadius * 0.90f)
         {
-            // Puxar para trás cancela o sprint lock
+            forwardSprintTimer += Mathf.Max(0f, deltaTime);
+            if (forwardSprintTimer >= sprintLockHoldDuration)
+            {
+                isSprintLocked = true;
+            }
+        }
+        else
+        {
+            forwardSprintTimer = Mathf.Max(0f, forwardSprintTimer - Mathf.Max(0f, deltaTime) * 2f);
+        }
+
+        if (rawCanvasDelta.y < -deadZone * 2f)
+        {
             isSprintLocked = false;
+            forwardSprintTimer = 0f;
+        }
+
+        // 2. Follow Thumb: base acompanha suavemente o polegar alem do raio, respeitando limites seguros da tela
+        float distance = rawDistance;
+        if (joystickType == JoystickType.DynamicFloatingFollow && rawDistance > joystickRadius && joystickBackground != null && parentRectTransform != null)
+        {
+            Rect r = parentRectTransform.rect;
+            if (r.width < 10f || r.height < 10f) r = new Rect(-960f, -540f, 1920f, 1080f);
+            Vector2 anchorMid = (joystickBackground.anchorMin + joystickBackground.anchorMax) * 0.5f;
+            Vector2 anchorOrigin = new Vector2(r.xMin + r.width * anchorMid.x, r.yMin + r.height * anchorMid.y);
+
+            Vector2 excessCanvas = rawCanvasDelta - direction * joystickRadius;
+            Vector2 prevPos = joystickBackground.anchoredPosition;
+            Vector2 nextPos = ClampAnchoredToLeftZone(prevPos + excessCanvas, r, anchorOrigin);
+            Vector2 appliedDelta = nextPos - prevPos;
+
+            joystickBackground.anchoredPosition = nextPos;
+            touchStartScreenPos += appliedDelta * scaleFactor;
+
+            Vector2 updatedCanvasDelta = (currentScreenPos - touchStartScreenPos) / scaleFactor;
+            distance = updatedCanvasDelta.magnitude;
+            if (distance > 0.001f)
+            {
+                direction = updatedCanvasDelta / distance;
+            }
         }
 
         float clampedDistance = Mathf.Min(distance, joystickRadius);
-        float normalized = Mathf.Clamp01((clampedDistance - deadZone) / (joystickRadius - deadZone));
+        float normalized = Mathf.Clamp01((clampedDistance - deadZone) / Mathf.Max(1f, joystickRadius - deadZone));
 
-        // 3. Curva de sensibilidade cúbica suave: micro-ajustes perfeitos para caminhada furtiva
+        // Curva suave de resposta para controle preciso em caminhada e corrida
         float eased = Mathf.Pow(normalized, 1.35f);
         inputVector = direction * eased;
 
-        // Se Sprint Lock estiver engatado, força impulso total para a frente
         if (isSprintLocked)
         {
             inputVector.y = Mathf.Max(inputVector.y, 1.0f);
+            if (inputVector.sqrMagnitude > 1f) inputVector.Normalize();
         }
 
         if (joystickHandle != null)
@@ -414,27 +559,28 @@ public class MobileInputController : MonoBehaviour, IPointerDownHandler, IPointe
         }
     }
 
-    private void EndJoystickDrag()
+    public void EndDrag()
     {
         activeFingerId = -1;
         isDragging = false;
         inputVector = Vector2.zero;
         isSprintLocked = false;
+        forwardSprintTimer = 0f;
     }
 
-    // =================== FALLBACK uGUI / MOUSE NO PC ===================
+    // =================== FALLBACK uGUI / MOUSE NO PC (MODO MOBILE F2) ===================
 
     public void OnPointerDown(PointerEventData eventData)
     {
         if (Input.touchCount > 0) return;
-        StartJoystickDrag(eventData.pointerId, eventData.position);
+        BeginDragAt(eventData.pointerId, eventData.position);
     }
 
     public void OnDrag(PointerEventData eventData)
     {
         if (Input.touchCount > 0) return;
         if (!isDragging || eventData.pointerId != activeFingerId) return;
-        UpdateJoystickPosition(eventData.position);
+        UpdateDragAt(eventData.position);
     }
 
     public void OnPointerUp(PointerEventData eventData)
@@ -442,7 +588,7 @@ public class MobileInputController : MonoBehaviour, IPointerDownHandler, IPointe
         if (Input.touchCount > 0) return;
         if (eventData.pointerId == activeFingerId)
         {
-            EndJoystickDrag();
+            EndDrag();
         }
     }
 
@@ -453,10 +599,10 @@ public class MobileInputController : MonoBehaviour, IPointerDownHandler, IPointe
 
     private void OnDisable()
     {
-        EndJoystickDrag();
+        EndDrag();
     }
 
-    // =================== GERAÇÃO PROCEDURAL DE TEXTURAS ===================
+    // =================== GERACAO PROCEDURAL DE TEXTURAS ===================
 
     private static Sprite CreateRingTexture(int size)
     {
@@ -519,7 +665,7 @@ public class MobileInputController : MonoBehaviour, IPointerDownHandler, IPointe
         {
             for (int x = 0; x < size; x++)
             {
-                // Cria uma seta apontando para cima (▲)
+                // Seta apontando para cima
                 float normY = (float)y / size;
                 float halfWidth = (1.0f - normY) * (size * 0.45f);
                 float distFromCenter = Mathf.Abs(x - cx);

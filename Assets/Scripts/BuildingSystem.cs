@@ -134,7 +134,7 @@ public class BuildingSystem : MonoBehaviour
 
     private void BuildBarUI()
     {
-        Canvas canvas = FindAnyObjectByType<Canvas>();
+        Canvas canvas = HUDSurvivalOverlay.GetGameplayCanvas();
         if (canvas == null) return;
 
         buildBarObj = new GameObject("BuildingSystemBar");
@@ -317,6 +317,31 @@ public class BuildingSystem : MonoBehaviour
         Vector3 aim = playerTransform.position + forward * 1.8f;
 
         Vector2Int pos = new Vector2Int(Mathf.RoundToInt(aim.x), Mathf.RoundToInt(aim.z));
+        if (!CanBuildAt(pos.x, pos.y))
+        {
+            Vector2Int[] offsets =
+            {
+                new Vector2Int(1, 0), new Vector2Int(-1, 0),
+                new Vector2Int(0, 1), new Vector2Int(0, -1)
+            };
+            bool found = false;
+            for (int i = 0; i < offsets.Length; i++)
+            {
+                Vector2Int cand = pos + offsets[i];
+                if (CanBuildAt(cand.x, cand.y))
+                {
+                    pos = cand;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found)
+            {
+                Notify("Local bloqueado! Afaste-se de arvores, rochas ou agua para posicionar.");
+                return false;
+            }
+        }
+
         if (gameManager != null)
         {
             gameManager.UpdateMapCellNative(pos.x, pos.y, tileID);

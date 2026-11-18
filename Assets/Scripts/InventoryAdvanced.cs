@@ -35,7 +35,7 @@ public class InventoryAdvanced : MonoBehaviour
     public InventorySlot[] slots;
 
     // Hotbar (6 atalhos rapidos ligados por itemId para nao quebrar ao reordenar)
-    public int[] hotbarItemIds = new int[6] { 300, 305, 302, 303, 210, 206 };
+    public int[] hotbarItemIds = new int[6] { -1, -1, -1, -1, -1, -1 };
     public int activeHotbarIndex = 0;
 
     // Equipamentos Ativos
@@ -46,7 +46,10 @@ public class InventoryAdvanced : MonoBehaviour
     // Eventos
     public event Action OnInventoryChanged;
     public event Action OnEquipmentChanged;
+    /// <summary>Disparado sempre que itens sao adicionados (itemId, addedAmount, newTotal).</summary>
+    public event Action<int, int, int> OnItemAdded;
 
+    private bool suppressAddNotifications = false;
     private float nextSpoilCheckTime = 0f;
     private float nextSpoilWarnTime = 0f;
 
@@ -54,17 +57,93 @@ public class InventoryAdvanced : MonoBehaviour
     {
         if (Instance == null) Instance = this;
         ItemDatabase.Initialize();
+        ResetToStartingKit();
+    }
 
-        slots = new InventorySlot[maxSlots];
-        for (int i = 0; i < maxSlots; i++)
+    public void ResetToStartingKit()
+    {
+        ItemDatabase.Initialize();
+
+        if (slots == null || slots.Length != maxSlots)
         {
-            slots[i] = new InventorySlot();
+            slots = new InventorySlot[maxSlots];
+            for (int i = 0; i < maxSlots; i++)
+            {
+                slots[i] = new InventorySlot();
+            }
+        }
+        else
+        {
+            for (int i = 0; i < maxSlots; i++)
+            {
+                if (slots[i] == null) slots[i] = new InventorySlot();
+                else slots[i].Clear();
+            }
         }
 
-        // Itens iniciais de sobrevivencia equilibrados
-        AddItem(205, 3);  // 3 Fosforos
-        AddItem(106, 2);  // 2 Sal
-        AddItem(202, 5);  // 5 Bagas Silvestres
+        if (hotbarItemIds == null || hotbarItemIds.Length != 6)
+        {
+            hotbarItemIds = new int[6];
+        }
+        for (int h = 0; h < hotbarItemIds.Length; h++)
+        {
+            hotbarItemIds[h] = -1;
+        }
+
+        activeHotbarIndex = 0;
+        equippedMainHandId = -1;
+        equippedOffHandId = -1;
+        equippedArmorId = -1;
+
+        // Kit inicial equilibrado de sobrevivencia (suprime notificacoes na inicializacao)
+        suppressAddNotifications = true;
+        try
+        {
+            AddItem(205, 3);  // 3 Fosforos
+            AddItem(106, 2);  // 2 Sal
+            AddItem(202, 5);  // 5 Bagas Silvestres
+            AddItem(100, 2);  // 2 Madeira (galhos secos na mochila de viagem)
+            AddItem(101, 2);  // 2 Pedra (pederneiras de emergencia)
+        }
+        finally
+        {
+            suppressAddNotifications = false;
+        }
+
+        OnInventoryChanged?.Invoke();
+        OnEquipmentChanged?.Invoke();
+    }
+
+    public void SanitizeHotbarBindings()
+    {
+        SanitizeHotbarBindings(true);
+    }
+
+    public void SanitizeHotbarBindings(bool autoFillMissing)
+    {
+        if (hotbarItemIds == null || hotbarItemIds.Length != 6)
+        {
+            hotbarItemIds = new int[6] { -1, -1, -1, -1, -1, -1 };
+        }
+
+        for (int h = 0; h < hotbarItemIds.Length; h++)
+        {
+            if (hotbarItemIds[h] > 0 && !HasItem(hotbarItemIds[h]))
+            {
+                hotbarItemIds[h] = -1;
+            }
+        }
+
+        if (!autoFillMissing) return;
+
+        for (int i = 0; i < maxSlots; i++)
+        {
+            if (!slots[i].IsEmpty())
+            {
+                ItemData d = ItemDatabase.GetItem(slots[i].itemId);
+                if (d != null) AutoBindHotbarIfUseful(d);
+            }
+        }
     }
 
     private void Start()
@@ -123,6 +202,8 @@ public class InventoryAdvanced : MonoBehaviour
             if (slots[i].itemId == itemId && slots[i].quantity < data.maxStack)
             {
                 int canAdd = Mathf.Min(remaining, data.maxStack - slots[i].quantity);
+                float freshDur = data.maxDurability > 0f ? data.maxDurability : -1f;
+                slots[i].durability = MergeSlotDurability(data, slots[i].durability, slots[i].quantity, freshDur, canAdd);
                 slots[i].quantity += canAdd;
                 remaining -= canAdd;
             }
@@ -141,11 +222,18 @@ public class InventoryAdvanced : MonoBehaviour
             }
         }
 
-        if (remaining < amount)
+        int added = amount - remaining;
+        if (added > 0)
         {
             AutoBindHotbarIfUseful(data);
             AutoEquipIfFirstTool(data);
             OnInventoryChanged?.Invoke();
+
+            if (!suppressAddNotifications)
+            {
+                int totalNow = GetItemCount(itemId);
+                OnItemAdded?.Invoke(itemId, added, totalNow);
+            }
         }
 
         return remaining;
@@ -161,6 +249,18 @@ public class InventoryAdvanced : MonoBehaviour
         return count;
     }
 
+    public bool HasRefillableCanteen()
+    {
+        ItemData canteenData = ItemDatabase.GetItem(210);
+        float maxCharges = canteenData != null && canteenData.maxDurability > 0f ? canteenData.maxDurability : 3f;
+        for (int i = 0; i < maxSlots; i++)
+        {
+            if (!slots[i].IsEmpty() && slots[i].itemId == 210 && slots[i].durability < maxCharges - 0.01f)
+                return true;
+        }
+        return false;
+    }
+
     public bool TryRefillCanteen(out string message)
     {
         message = string.Empty;
@@ -173,7 +273,7 @@ public class InventoryAdvanced : MonoBehaviour
             {
                 slots[i].durability = maxCharges;
                 OnInventoryChanged?.Invoke();
-                message = "Cantil de Couro reabastecido (3/3 golos)!";
+                message = "Cantil de Couro reabastecido (3/3 goles)!";
                 return true;
             }
         }
@@ -241,7 +341,7 @@ public class InventoryAdvanced : MonoBehaviour
     public int GetRepairIngredientId(int itemId, out string ingredientName)
     {
         if (itemId == 312 || itemId == 304) { ingredientName = "Ferro Velho"; return 107; }
-        if (itemId == 310) { ingredientName = "Pele de Animal"; return 105; }
+        if (itemId == 310 || itemId == 314) { ingredientName = "Pele de Animal"; return 105; }
         if (itemId == 311 || itemId == 313) { ingredientName = "Osso"; return 120; }
         if (HasItem(101)) { ingredientName = "Pedra"; return 101; }
         ingredientName = "Madeira";
@@ -299,9 +399,20 @@ public class InventoryAdvanced : MonoBehaviour
         {
             if (hotbarItemIds[h] == data.id) return;
         }
+
+        // Prioriza substituir slots vazios antes de substituir itens consumidos
         for (int h = 0; h < hotbarItemIds.Length; h++)
         {
-            if (hotbarItemIds[h] <= 0 || !HasItem(hotbarItemIds[h]))
+            if (hotbarItemIds[h] <= 0)
+            {
+                hotbarItemIds[h] = data.id;
+                return;
+            }
+        }
+
+        for (int h = 0; h < hotbarItemIds.Length; h++)
+        {
+            if (!HasItem(hotbarItemIds[h]))
             {
                 hotbarItemIds[h] = data.id;
                 return;
@@ -415,10 +526,80 @@ public class InventoryAdvanced : MonoBehaviour
         return true;
     }
 
+    public bool EquipFromSlot(int slotIndex, EquipSlotType? requiredSlot = null)
+    {
+        if (slotIndex < 0 || slotIndex >= maxSlots || slots[slotIndex].IsEmpty()) return false;
+        int itemId = slots[slotIndex].itemId;
+        ItemData data = ItemDatabase.GetItem(itemId);
+        if (data == null || data.equipSlot == EquipSlotType.None) return false;
+        if (requiredSlot.HasValue && data.equipSlot != requiredSlot.Value) return false;
+
+        if (!data.isPerishable && data.maxDurability > 0f && slots[slotIndex].durability == 0f)
+        {
+            if (HUDSurvivalOverlay.Instance != null)
+                HUDSurvivalOverlay.Instance.ShowLootTooltip($"{data.itemName} quebrado! Conserte na Mesa de Trabalho.");
+            return false;
+        }
+
+        // Ao arrastar diretamente para um card de equipamento, nunca alterna para vazio se ja estiver equipado.
+        if (data.equipSlot == EquipSlotType.OffHand && equippedOffHandId == itemId)
+        {
+            OnEquipmentChanged?.Invoke();
+            return true;
+        }
+        if (data.equipSlot == EquipSlotType.BodyArmor && equippedArmorId == itemId)
+        {
+            OnEquipmentChanged?.Invoke();
+            return true;
+        }
+
+        return EquipItem(itemId);
+    }
+
     public void AssignHotbarSlot(int hotbarIndex, int itemId)
     {
         if (hotbarIndex < 0 || hotbarIndex >= hotbarItemIds.Length) return;
+        if (itemId > 0)
+        {
+            for (int h = 0; h < hotbarItemIds.Length; h++)
+            {
+                if (h != hotbarIndex && hotbarItemIds[h] == itemId)
+                    hotbarItemIds[h] = -1;
+            }
+        }
         hotbarItemIds[hotbarIndex] = itemId;
+        OnEquipmentChanged?.Invoke();
+    }
+
+    public bool AssignSlotToHotbar(int invSlotIndex, int hotbarIndex)
+    {
+        if (invSlotIndex < 0 || invSlotIndex >= maxSlots || slots[invSlotIndex].IsEmpty()) return false;
+        if (hotbarIndex < 0 || hotbarIndex >= hotbarItemIds.Length) return false;
+        AssignHotbarSlot(hotbarIndex, slots[invSlotIndex].itemId);
+        return true;
+    }
+
+    public bool SwapHotbarSlots(int hotbarA, int hotbarB)
+    {
+        if (hotbarItemIds == null || hotbarA < 0 || hotbarA >= hotbarItemIds.Length || hotbarB < 0 || hotbarB >= hotbarItemIds.Length)
+            return false;
+        if (hotbarA == hotbarB) return true;
+
+        int tmp = hotbarItemIds[hotbarA];
+        hotbarItemIds[hotbarA] = hotbarItemIds[hotbarB];
+        hotbarItemIds[hotbarB] = tmp;
+
+        if (activeHotbarIndex == hotbarA) activeHotbarIndex = hotbarB;
+        else if (activeHotbarIndex == hotbarB) activeHotbarIndex = hotbarA;
+
+        OnEquipmentChanged?.Invoke();
+        return true;
+    }
+
+    public void ClearHotbarSlot(int hotbarIndex)
+    {
+        if (hotbarItemIds == null || hotbarIndex < 0 || hotbarIndex >= hotbarItemIds.Length) return;
+        hotbarItemIds[hotbarIndex] = -1;
         OnEquipmentChanged?.Invoke();
     }
 
@@ -450,6 +631,7 @@ public class InventoryAdvanced : MonoBehaviour
     public bool UseItem(int slotIndex)
     {
         if (slotIndex < 0 || slotIndex >= maxSlots) return false;
+        if (playerStatus != null && playerStatus.IsDead) return false;
         if (slots[slotIndex].IsEmpty()) return false;
 
         ItemData data = ItemDatabase.GetItem(slots[slotIndex].itemId);
@@ -506,17 +688,35 @@ public class InventoryAdvanced : MonoBehaviour
                     return false;
                 }
 
+                if (!HasAnyPhysiologicalBenefit(data))
+                {
+                    if (HUDSurvivalOverlay.Instance != null)
+                        HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#FFCC66>Sede e folego ja estao no maximo — Cantil economizado!</color>");
+                    return false;
+                }
+
                 slots[slotIndex].durability = Mathf.Max(0f, slots[slotIndex].durability - 1f);
                 ApplyConsumablePhysiology(data);
 
                 if (FirstPersonViewmodelController.Instance != null)
-                    FirstPersonViewmodelController.Instance.TriggerConsumeAnimation();
+                    FirstPersonViewmodelController.Instance.TriggerConsumeAnimation(FirstPersonViewmodelController.ConsumeAnimKind.Drink, data.id);
+                if (AudioManager.Instance != null)
+                {
+                    AudioManager.Instance.PlayFoley(AudioManager.FoleyEventType.DrinkGulp, null, 0.72f, 0.94f, 1.06f);
+                }
 
                 if (HUDSurvivalOverlay.Instance != null)
-                    HUDSurvivalOverlay.Instance.ShowLootTooltip($"Bebeu do Cantil ({Mathf.RoundToInt(slots[slotIndex].durability)}/{Mathf.RoundToInt(data.maxDurability)} golos)");
+                    HUDSurvivalOverlay.Instance.ShowLootTooltip($"Bebeu do Cantil ({Mathf.RoundToInt(slots[slotIndex].durability)}/{Mathf.RoundToInt(data.maxDurability)} goles)");
 
                 OnInventoryChanged?.Invoke();
                 return true;
+            }
+
+            if (!HasAnyPhysiologicalBenefit(data))
+            {
+                if (HUDSurvivalOverlay.Instance != null)
+                    HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#FFCC66>Atributos ja estao no maximo — item economizado!</color>");
+                return false;
             }
 
             ApplyConsumablePhysiology(data);
@@ -527,9 +727,14 @@ public class InventoryAdvanced : MonoBehaviour
                 if (lore != null) lore.ShowNextPage();
             }
 
+            ResolveConsumeAnimAndFoley(data, out FirstPersonViewmodelController.ConsumeAnimKind animKind, out AudioManager.FoleyEventType foleyKind);
             if (FirstPersonViewmodelController.Instance != null)
             {
-                FirstPersonViewmodelController.Instance.TriggerConsumeAnimation();
+                FirstPersonViewmodelController.Instance.TriggerConsumeAnimation(animKind, data.id);
+            }
+            if (AudioManager.Instance != null)
+            {
+                AudioManager.Instance.PlayFoley(foleyKind, null, 0.72f, 0.93f, 1.07f);
             }
 
             slots[slotIndex].quantity--;
@@ -538,6 +743,64 @@ public class InventoryAdvanced : MonoBehaviour
             OnInventoryChanged?.Invoke();
             return true;
         }
+
+        return false;
+    }
+
+    private static void ResolveConsumeAnimAndFoley(ItemData data, out FirstPersonViewmodelController.ConsumeAnimKind animKind, out AudioManager.FoleyEventType foleyKind)
+    {
+        if (data == null)
+        {
+            animKind = FirstPersonViewmodelController.ConsumeAnimKind.Generic;
+            foleyKind = AudioManager.FoleyEventType.EatCrunch;
+            return;
+        }
+        if (data.curesBleeding || data.id == 208)
+        {
+            animKind = FirstPersonViewmodelController.ConsumeAnimKind.Bandage;
+            foleyKind = AudioManager.FoleyEventType.BandageWrap;
+            return;
+        }
+        if (data.curesFracture || data.id == 209)
+        {
+            animKind = FirstPersonViewmodelController.ConsumeAnimKind.Splint;
+            foleyKind = AudioManager.FoleyEventType.SplintSnap;
+            return;
+        }
+        if (data.id == 116)
+        {
+            animKind = FirstPersonViewmodelController.ConsumeAnimKind.ReadNote;
+            foleyKind = AudioManager.FoleyEventType.PickupHerb;
+            return;
+        }
+        if (data.thirstRestore > 0f && data.hungerRestore <= 0f)
+        {
+            animKind = FirstPersonViewmodelController.ConsumeAnimKind.Drink;
+            foleyKind = AudioManager.FoleyEventType.DrinkGulp;
+            return;
+        }
+        animKind = FirstPersonViewmodelController.ConsumeAnimKind.Eat;
+        foleyKind = AudioManager.FoleyEventType.EatCrunch;
+    }
+
+    private bool HasAnyPhysiologicalBenefit(ItemData data)
+    {
+        if (data == null || data.poisonDuration > 0f || data.id == 116 || data.id == 205)
+            return true;
+
+        if (playerStatus == null) playerStatus = PlayerStatus.Instance;
+        if (playerStatus == null) return true;
+
+        if (data.hungerRestore > 0f && playerStatus.hunger < 99.5f) return true;
+        if (data.thirstRestore > 0f && playerStatus.thirst < 99.5f) return true;
+        if (data.healthRestore > 0f && playerStatus.health < 99.5f) return true;
+        if (data.staminaRestore > 0f && playerStatus.stamina < playerStatus.EffectiveMaxStamina - 1f) return true;
+        if (data.sanityRestore > 0f && sanitySystem != null && sanitySystem.sanity < 99.5f) return true;
+        if (data.curesBleeding && playerStatus.isBleeding) return true;
+        if (data.curesFracture && playerStatus.isFractured) return true;
+        if (data.poisonDuration < 0f && playerStatus.isPoisoned) return true;
+        if ((data.id == 211 || data.id == 201 || data.id == 208) && playerStatus.isSick) return true;
+        if (data.warmthBonus > 0f && BodyTemperatureSystem.Instance != null && BodyTemperatureSystem.Instance.currentTemperature < 36.8f) return true;
 
         return false;
     }
@@ -615,6 +878,10 @@ public class InventoryAdvanced : MonoBehaviour
         {
             closest.AddFuel(100f);
             closest.Ignite();
+            if (AudioManager.Instance != null)
+            {
+                AudioManager.Instance.PlayFoley(AudioManager.FoleyEventType.FireIgnite, closest.transform.position, 0.78f);
+            }
             if (HUDSurvivalOverlay.Instance != null)
                 HUDSurvivalOverlay.Instance.ShowLootTooltip("Fogueira acesa com Fosforo!");
             return true;
@@ -623,6 +890,10 @@ public class InventoryAdvanced : MonoBehaviour
         if (sanitySystem != null && sanitySystem.oil < 95f)
         {
             sanitySystem.RefillOil(25f);
+            if (AudioManager.Instance != null)
+            {
+                AudioManager.Instance.PlayFoley(AudioManager.FoleyEventType.LighterFlick, null, 0.65f);
+            }
             if (HUDSurvivalOverlay.Instance != null)
                 HUDSurvivalOverlay.Instance.ShowLootTooltip("Lampiao aceso/recarregado (+25% Oleo)!");
             return true;
@@ -633,22 +904,26 @@ public class InventoryAdvanced : MonoBehaviour
         return false;
     }
 
+    public static int GetDeployableTileId(int itemId)
+    {
+        switch (itemId)
+        {
+            case 400: return 4;  // Fogueira
+            case 401: return 5;  // Armadilha de Caca Pesada
+            case 402: return 25; // Circulo de Sal (dedicado)
+            case 403: return 12; // Coletor de Agua
+            case 404: return 13; // Mesa de Trabalho
+            case 405: return 15; // Caldeirao
+            case 406: return 16; // Laco para Coelhos
+            default: return -1;
+        }
+    }
+
     private bool TryUseDeployable(int itemId)
     {
         if (buildingSystem == null) buildingSystem = BuildingSystem.Instance ?? FindAnyObjectByType<BuildingSystem>();
 
-        int tileId = -1;
-        switch (itemId)
-        {
-            case 400: tileId = 4; break;  // Fogueira
-            case 401: tileId = 5; break;  // Armadilha
-            case 404: tileId = 13; break; // Bancada
-            case 405: tileId = 15; break; // Caldeirao
-            case 402: tileId = 16; break; // Circulo de Sal
-            case 403: tileId = 17; break; // Coletor de Agua
-            case 406: tileId = 5; break;  // Laco de Coelhos
-        }
-
+        int tileId = GetDeployableTileId(itemId);
         if (tileId > 0 && buildingSystem != null && buildingSystem.ForceBuild(tileId))
         {
             if (HUDSurvivalOverlay.Instance != null)
@@ -719,24 +994,86 @@ public class InventoryAdvanced : MonoBehaviour
         OnInventoryChanged?.Invoke();
     }
 
+    private static float MergeSlotDurability(ItemData data, float targetDur, int targetQty, float sourceDur, int movedQty)
+    {
+        if (data == null || data.maxDurability <= 0f) return targetDur;
+        float tDur = targetDur < 0f ? data.maxDurability : targetDur;
+        float sDur = sourceDur < 0f ? data.maxDurability : sourceDur;
+        if (data.isPerishable)
+        {
+            int total = Mathf.Max(1, targetQty + movedQty);
+            float weighted = (tDur * Mathf.Max(0, targetQty) + sDur * Mathf.Max(0, movedQty)) / total;
+            return Mathf.Clamp(weighted, 0.5f, data.maxDurability);
+        }
+        return Mathf.Clamp(Mathf.Min(tDur, sDur), 0f, data.maxDurability);
+    }
+
     public bool SplitSlot(int slotIndex)
     {
         if (slotIndex < 0 || slotIndex >= maxSlots) return false;
         if (slots[slotIndex].IsEmpty() || slots[slotIndex].quantity < 2) return false;
+        return SplitSlot(slotIndex, slots[slotIndex].quantity / 2, -1);
+    }
+
+    public bool SplitSlot(int slotIndex, int splitAmount, int targetEmptySlot = -1)
+    {
+        if (slotIndex < 0 || slotIndex >= maxSlots) return false;
+        if (slots[slotIndex].IsEmpty() || slots[slotIndex].quantity < 2) return false;
+        if (splitAmount <= 0 || splitAmount >= slots[slotIndex].quantity) return false;
 
         int emptyIdx = -1;
-        for (int i = 0; i < maxSlots; i++)
+        if (targetEmptySlot >= 0)
         {
-            if (slots[i].IsEmpty()) { emptyIdx = i; break; }
+            if (targetEmptySlot >= maxSlots || targetEmptySlot == slotIndex || !slots[targetEmptySlot].IsEmpty())
+                return false;
+            emptyIdx = targetEmptySlot;
+        }
+        else
+        {
+            for (int i = 0; i < maxSlots; i++)
+            {
+                if (slots[i].IsEmpty()) { emptyIdx = i; break; }
+            }
         }
         if (emptyIdx < 0) return false;
 
-        int half = slots[slotIndex].quantity / 2;
-        slots[slotIndex].quantity -= half;
+        slots[slotIndex].quantity -= splitAmount;
         slots[emptyIdx].itemId = slots[slotIndex].itemId;
-        slots[emptyIdx].quantity = half;
+        slots[emptyIdx].quantity = splitAmount;
         slots[emptyIdx].durability = slots[slotIndex].durability;
 
+        OnInventoryChanged?.Invoke();
+        return true;
+    }
+
+    public bool MoveOrMergeSlot(int fromSlot, int toSlot, int moveAmount = -1)
+    {
+        if (fromSlot < 0 || fromSlot >= maxSlots || toSlot < 0 || toSlot >= maxSlots || fromSlot == toSlot)
+            return false;
+        if (slots[fromSlot].IsEmpty()) return false;
+
+        if (moveAmount <= 0 || moveAmount >= slots[fromSlot].quantity)
+        {
+            SwapSlots(fromSlot, toSlot);
+            return true;
+        }
+
+        if (slots[toSlot].IsEmpty())
+        {
+            return SplitSlot(fromSlot, moveAmount, toSlot);
+        }
+
+        if (slots[toSlot].itemId != slots[fromSlot].itemId) return false;
+
+        ItemData data = ItemDatabase.GetItem(slots[fromSlot].itemId);
+        int maxStack = data != null ? data.maxStack : 1;
+        int actualMove = Mathf.Min(moveAmount, maxStack - slots[toSlot].quantity);
+        if (actualMove <= 0) return false;
+
+        slots[toSlot].durability = MergeSlotDurability(data, slots[toSlot].durability, slots[toSlot].quantity, slots[fromSlot].durability, actualMove);
+        slots[toSlot].quantity += actualMove;
+        slots[fromSlot].quantity -= actualMove;
+        if (slots[fromSlot].quantity <= 0) slots[fromSlot].Clear();
         OnInventoryChanged?.Invoke();
         return true;
     }
@@ -751,6 +1088,7 @@ public class InventoryAdvanced : MonoBehaviour
             if (data != null && slots[slotB].quantity < data.maxStack)
             {
                 int move = Mathf.Min(slots[slotA].quantity, data.maxStack - slots[slotB].quantity);
+                slots[slotB].durability = MergeSlotDurability(data, slots[slotB].durability, slots[slotB].quantity, slots[slotA].durability, move);
                 slots[slotB].quantity += move;
                 slots[slotA].quantity -= move;
                 if (slots[slotA].quantity <= 0) slots[slotA].Clear();
@@ -777,9 +1115,106 @@ public class InventoryAdvanced : MonoBehaviour
         OnInventoryChanged?.Invoke();
     }
 
-    public void NotifyStateLoaded()
+    public void NotifyStateLoaded(bool preserveSavedHotbar = false)
     {
+        SanitizeHotbarBindings(!preserveSavedHotbar);
         OnInventoryChanged?.Invoke();
         OnEquipmentChanged?.Invoke();
+    }
+
+    public float GetEstimatedWeightKg()
+    {
+        float total = 0f;
+        if (slots == null) return 0f;
+        for (int i = 0; i < maxSlots && i < slots.Length; i++)
+        {
+            if (slots[i] == null || slots[i].IsEmpty()) continue;
+            ItemData data = ItemDatabase.GetItem(slots[i].itemId);
+            if (data == null) continue;
+            float unitW = 0.35f;
+            switch (data.category)
+            {
+                case ItemCategory.ToolAndWeapon: unitW = 1.45f; break;
+                case ItemCategory.ArmorAndLight: unitW = 1.85f; break;
+                case ItemCategory.Deployable: unitW = 2.20f; break;
+                case ItemCategory.Consumable: unitW = 0.30f; break;
+                case ItemCategory.Resource: unitW = (data.id == 100 || data.id == 101) ? 0.65f : 0.35f; break;
+            }
+            total += unitW * slots[i].quantity;
+        }
+        return total;
+    }
+
+    public const float HeavyWeightThresholdKg = 32f;
+    public const float MaxCarryWeightKg = 45f;
+
+    public float GetEncumbrance01() => Mathf.Clamp01(GetEstimatedWeightKg() / MaxCarryWeightKg);
+    public bool IsHeavyLoad => GetEstimatedWeightKg() >= HeavyWeightThresholdKg && !IsOverEncumbered;
+    public bool IsOverEncumbered => GetEstimatedWeightKg() >= MaxCarryWeightKg;
+
+    public float GetMoveSpeedMultiplier()
+    {
+        float w = GetEstimatedWeightKg();
+        if (w >= MaxCarryWeightKg) return 0.62f;
+        if (w >= HeavyWeightThresholdKg) return 0.85f;
+        return 1.0f;
+    }
+
+    public string GetEncumbranceLabel()
+    {
+        float w = GetEstimatedWeightKg();
+        if (w >= MaxCarryWeightKg) return "SOBRECARGA";
+        if (w >= HeavyWeightThresholdKg) return "PESADO";
+        return "NORMAL";
+    }
+
+    public void SortAndCompact()
+    {
+        if (slots == null || slots.Length == 0) return;
+
+        // 1. Fundir pilhas incompletas do mesmo item
+        for (int i = 0; i < maxSlots && i < slots.Length; i++)
+        {
+            if (slots[i].IsEmpty()) continue;
+            ItemData data = ItemDatabase.GetItem(slots[i].itemId);
+            if (data == null || data.maxStack <= 1 || slots[i].quantity >= data.maxStack) continue;
+
+            for (int j = i + 1; j < maxSlots && j < slots.Length; j++)
+            {
+                if (slots[j].IsEmpty() || slots[j].itemId != slots[i].itemId) continue;
+                int move = Mathf.Min(slots[j].quantity, data.maxStack - slots[i].quantity);
+                if (move <= 0) break;
+                slots[i].durability = MergeSlotDurability(data, slots[i].durability, slots[i].quantity, slots[j].durability, move);
+                slots[i].quantity += move;
+                slots[j].quantity -= move;
+                if (slots[j].quantity <= 0) slots[j].Clear();
+                if (slots[i].quantity >= data.maxStack) break;
+            }
+        }
+
+        // 2. Ordenar por categoria, nome e ID (slots vazios no fim)
+        System.Array.Sort(slots, (a, b) =>
+        {
+            bool aEmpty = a == null || a.IsEmpty();
+            bool bEmpty = b == null || b.IsEmpty();
+            if (aEmpty && bEmpty) return 0;
+            if (aEmpty) return 1;
+            if (bEmpty) return -1;
+
+            ItemData da = ItemDatabase.GetItem(a.itemId);
+            ItemData db = ItemDatabase.GetItem(b.itemId);
+            int catA = da != null ? (int)da.category : 99;
+            int catB = db != null ? (int)db.category : 99;
+            if (catA != catB) return catA.CompareTo(catB);
+
+            string na = da != null ? da.itemName : string.Empty;
+            string nb = db != null ? db.itemName : string.Empty;
+            int cmp = string.Compare(na, nb, System.StringComparison.OrdinalIgnoreCase);
+            if (cmp != 0) return cmp;
+            return a.itemId.CompareTo(b.itemId);
+        });
+
+        SanitizeHotbarBindings(false);
+        OnInventoryChanged?.Invoke();
     }
 }

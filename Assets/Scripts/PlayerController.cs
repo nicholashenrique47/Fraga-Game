@@ -57,16 +57,24 @@ public class PlayerController : MonoBehaviour
     private bool isGrounded = true;
     private Vector3 groundNormal = Vector3.up;
     public bool isSwimming { get; private set; }
+    private bool wasSwimming = false;
+    private float swimStrokeFoleyTimer = 0f;
     private float coyoteTimer = 0f;
     private float jumpBufferTimer = 0f;
     private float peakFallSpeed = 0f;
 
     private Vector3 knockbackVelocity;
     private float knockbackTime;
+    private float invulnerabilityTimer = 0f;
+    private float dodgeCooldownTimer = 0f;
+    private float dodgeTimer = 0f;
+    private Vector3 dodgeVelocity = Vector3.zero;
     private bool isMantling = false;
     private static readonly float[] ObstacleCheckHeights = { 0.68f, 1.15f };
 
     public bool isSprinting { get; private set; }
+    public bool IsInvulnerable => invulnerabilityTimer > 0f;
+    public bool IsDodging => dodgeTimer > 0f;
     public bool IsGrounded => isGrounded;
     public bool IsMoving => currentVelocity.sqrMagnitude > 0.05f;
     public float CurrentSpeed => new Vector2(currentVelocity.x, currentVelocity.z).magnitude;
@@ -158,6 +166,7 @@ public class PlayerController : MonoBehaviour
             lighterLight.intensity = 0f;
             lighterLight.color = new Color(1f, 0.75f, 0.4f);
             lighterLight.shadows = LightShadows.None;
+            lighterLight.enabled = false;
 
             GameObject spotObj = new GameObject("PlayerLanternBeam");
             spotObj.transform.SetParent(Camera.main != null ? Camera.main.transform : this.transform, false);
@@ -171,6 +180,7 @@ public class PlayerController : MonoBehaviour
             spotCookieLight.color = new Color(1f, 0.84f, 0.62f);
             spotCookieLight.shadows = LightShadows.None;
             spotCookieLight.cookie = GetOrCreateLanternCookie();
+            spotCookieLight.enabled = false;
         }
     }
 
@@ -201,28 +211,71 @@ public class PlayerController : MonoBehaviour
         return s_lanternCookieTex;
     }
 
+    public void SetLighterState(bool on, bool showEmptyFeedback = false)
+    {
+        if (sanityCache == null) sanityCache = GetComponent<SanitySystem>() ?? FindAnyObjectByType<SanitySystem>();
+        bool hasOffHandLight = InventoryAdvanced.Instance != null &&
+                               (InventoryAdvanced.Instance.equippedOffHandId == 303 || InventoryAdvanced.Instance.equippedOffHandId == 304);
+
+        if (on && sanityCache != null && sanityCache.oil <= sanityCache.minOilThresholdForLight && !hasOffHandLight)
+        {
+            isLighterOn = false;
+            sanityCache.SetLampState(false);
+            if (showEmptyFeedback && HUDSurvivalOverlay.Instance != null)
+            {
+                HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#FFAA55>Oleo do lampiao esgotado!</color>");
+            }
+            return;
+        }
+
+        bool turningOn = !isLighterOn && on;
+        isLighterOn = on;
+        if (sanityCache != null)
+        {
+            sanityCache.SetLampState(isLighterOn);
+        }
+        if (turningOn && AudioManager.Instance != null)
+        {
+            AudioManager.Instance.PlayFoley(AudioManager.FoleyEventType.LighterFlick, null, 0.56f, 0.94f, 1.06f);
+        }
+        if (FirstPersonViewmodelController.Instance != null)
+        {
+            FirstPersonViewmodelController.Instance.RefreshLeftLighterState();
+        }
+    }
+
     public void ToggleLighter()
     {
-        isLighterOn = !isLighterOn;
+        SetLighterState(!isLighterOn, showEmptyFeedback: true);
     }
 
     private void UpdateLighter()
     {
+        bool isDead = playerStatus != null && playerStatus.IsDead;
         bool pressedLight = FragaInputRouter.Instance != null
             ? FragaInputRouter.Instance.LightTogglePressedThisFrame
             : Input.GetKeyDown(KeyCode.L);
 
-        if (pressedLight)
+        if (isDead && isLighterOn) SetLighterState(false);
+        else if (!isDead && pressedLight)
         {
-            isLighterOn = !isLighterOn;
-            if (sanityCache != null) sanityCache.ToggleLamp();
+            ToggleLighter();
+        }
+
+        bool hasOffHandLight = InventoryAdvanced.Instance != null &&
+                               (InventoryAdvanced.Instance.equippedOffHandId == 303 || InventoryAdvanced.Instance.equippedOffHandId == 304);
+
+        if (isLighterOn && sanityCache != null && sanityCache.oil <= sanityCache.minOilThresholdForLight && !hasOffHandLight)
+        {
+            isLighterOn = false;
+            sanityCache.SetLampState(false);
         }
 
         if (lighterLight != null)
         {
-            bool hasOffHandLight = InventoryAdvanced.Instance != null && (InventoryAdvanced.Instance.equippedOffHandId == 303 || InventoryAdvanced.Instance.equippedOffHandId == 304);
             float targetIntensity = isLighterOn ? (hasOffHandLight ? 0.9f : 2.1f) + Random.Range(-0.12f, 0.12f) : 0f;
             lighterLight.intensity = Mathf.Lerp(lighterLight.intensity, targetIntensity, Time.deltaTime * 10f);
+            lighterLight.enabled = lighterLight.intensity > 0.01f;
         }
 
         if (spotCookieLight != null)
@@ -231,6 +284,7 @@ public class PlayerController : MonoBehaviour
             bool beamOn = isLighterOn || hasLanternOffHand;
             float targetBeam = beamOn ? (hasLanternOffHand ? 2.4f : 1.35f) + Random.Range(-0.06f, 0.06f) : 0f;
             spotCookieLight.intensity = Mathf.Lerp(spotCookieLight.intensity, targetBeam, Time.deltaTime * 10f);
+            spotCookieLight.enabled = spotCookieLight.intensity > 0.01f;
         }
     }
 
@@ -291,6 +345,12 @@ public class PlayerController : MonoBehaviour
     private void Update()
     {
         UpdateLighter();
+        if ((playerStatus != null && playerStatus.IsDead) || Time.timeScale <= 0.001f)
+        {
+            rawInputDirection = Vector3.zero;
+            isSprinting = false;
+            return;
+        }
         HandleCrouchHeight();
         ProcessInput();
         UpdateFootsteps();
@@ -316,6 +376,7 @@ public class PlayerController : MonoBehaviour
         bool wantsSprint = false;
         bool crouchPressed = false;
         bool jumpPressed = false;
+        bool dodgePressed = false;
 
         if (router != null)
         {
@@ -324,6 +385,7 @@ public class PlayerController : MonoBehaviour
             wantsSprint = router.WantsSprint;
             crouchPressed = router.CrouchPressedThisFrame;
             jumpPressed = router.JumpPressedThisFrame;
+            dodgePressed = router.DodgePressedThisFrame;
         }
         else
         {
@@ -343,6 +405,7 @@ public class PlayerController : MonoBehaviour
             wantsSprint = wantsSprint || Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
             crouchPressed = Input.GetKeyDown(KeyCode.C) || Input.GetKeyDown(KeyCode.LeftControl);
             jumpPressed = Input.GetButtonDown("Jump") || Input.GetKeyDown(KeyCode.Space);
+            dodgePressed = Input.GetKeyDown(KeyCode.LeftAlt) || Input.GetKeyDown(KeyCode.V);
         }
 
         if (crouchPressed)
@@ -351,13 +414,14 @@ public class PlayerController : MonoBehaviour
         }
 
         bool isMovingInput = (Mathf.Abs(horizontal) > 0.01f || Mathf.Abs(vertical) > 0.01f);
+        bool overEncumbered = InventoryAdvanced.Instance != null && InventoryAdvanced.Instance.IsOverEncumbered;
         if (playerStatus != null)
         {
-            isSprinting = wantsSprint && playerStatus.stamina > 5f && !isCrouching && !playerStatus.isFractured && isMovingInput;
+            isSprinting = wantsSprint && !overEncumbered && !playerStatus.isExhausted && playerStatus.stamina > 5f && !isCrouching && !playerStatus.isFractured && isMovingInput;
         }
         else
         {
-            isSprinting = wantsSprint && !isCrouching && isMovingInput;
+            isSprinting = wantsSprint && !overEncumbered && !isCrouching && isMovingInput;
         }
 
         if (jumpPressed)
@@ -406,6 +470,90 @@ public class PlayerController : MonoBehaviour
         {
             knockbackTime -= Time.deltaTime;
         }
+
+        if (invulnerabilityTimer > 0f)
+        {
+            invulnerabilityTimer = Mathf.Max(0f, invulnerabilityTimer - Time.deltaTime);
+        }
+        if (dodgeCooldownTimer > 0f)
+        {
+            dodgeCooldownTimer = Mathf.Max(0f, dodgeCooldownTimer - Time.deltaTime);
+        }
+        if (dodgeTimer > 0f)
+        {
+            dodgeTimer = Mathf.Max(0f, dodgeTimer - Time.deltaTime);
+            if (dodgeTimer <= 0f && FirstPersonCamera.Instance != null)
+            {
+                FirstPersonCamera.Instance.SetTilt(0f);
+            }
+        }
+
+        if (dodgePressed)
+        {
+            TryDodge();
+        }
+    }
+
+    public bool TryDodge()
+    {
+        if (dodgeCooldownTimer > 0f || isMantling || isSwimming) return false;
+        if (LogCarryingSystem.Instance != null && LogCarryingSystem.Instance.currentLogs >= 2) return false;
+
+        if (playerStatus != null)
+        {
+            if (playerStatus.isFractured)
+            {
+                if (HUDSurvivalOverlay.Instance != null)
+                    HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#FFAA44>Perna fraturada impede esquiva!</color>");
+                return false;
+            }
+            if (playerStatus.isExhausted || playerStatus.stamina < 12f)
+            {
+                if (HUDSurvivalOverlay.Instance != null)
+                    HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#FF9944>Sem folego para esquivar!</color>");
+                return false;
+            }
+
+            playerStatus.stamina = Mathf.Max(0f, playerStatus.stamina - 18f);
+            if (playerStatus.stamina <= 0.5f) playerStatus.isExhausted = true;
+        }
+
+        if (mainCamera == null) mainCamera = Camera.main;
+        Vector3 camForward = mainCamera != null ? mainCamera.transform.forward : transform.forward;
+        Vector3 camRight = mainCamera != null ? mainCamera.transform.right : transform.right;
+        camForward.y = 0f;
+        camRight.y = 0f;
+        if (camForward.sqrMagnitude < 0.001f) camForward = transform.forward;
+        if (camRight.sqrMagnitude < 0.001f) camRight = transform.right;
+        camForward.Normalize();
+        camRight.Normalize();
+
+        Vector3 dodgeDir = rawInputDirection.sqrMagnitude > 0.04f ? rawInputDirection.normalized : -camForward;
+        dodgeVelocity = dodgeDir * 11.8f;
+        dodgeTimer = 0.24f;
+        invulnerabilityTimer = 0.28f;
+        dodgeCooldownTimer = 0.85f;
+
+        if (FirstPersonCamera.Instance != null)
+        {
+            float lateral = Vector3.Dot(dodgeDir, camRight);
+            FirstPersonCamera.Instance.SetTilt(-lateral * 4.5f);
+        }
+        if (FirstPersonViewmodelController.Instance != null)
+        {
+            FirstPersonViewmodelController.Instance.TriggerVerticalImpulse(-0.04f);
+        }
+        if (footstepAudio != null && footstepClips != null && footstepClips.Length > 0)
+        {
+            footstepAudio.pitch = Random.Range(1.08f, 1.24f);
+            footstepAudio.PlayOneShot(footstepClips[0], 0.42f);
+        }
+        if (FragaStealthSystem.Instance != null)
+        {
+            FragaStealthSystem.Instance.EmitNoisePulse(0.35f);
+        }
+
+        return true;
     }
 
     private void CheckMantling()
@@ -445,6 +593,14 @@ public class PlayerController : MonoBehaviour
         float elapsed = 0f;
         float duration = 0.36f;
 
+        if (FirstPersonViewmodelController.Instance != null)
+        {
+            FirstPersonViewmodelController.Instance.TriggerClimbAnimation(duration);
+        }
+        if (AudioManager.Instance != null)
+        {
+            AudioManager.Instance.PlayFoley(AudioManager.FoleyEventType.ClimbScrape, transform.position, 0.60f, 0.92f, 1.08f);
+        }
         if (FirstPersonCamera.Instance != null) FirstPersonCamera.Instance.AddShake(0.06f);
 
         while (elapsed < duration)
@@ -463,6 +619,7 @@ public class PlayerController : MonoBehaviour
 
     public void TryJump()
     {
+        if (playerStatus != null && (playerStatus.IsDead || playerStatus.isExhausted)) return;
         if (LogCarryingSystem.Instance != null && LogCarryingSystem.Instance.currentLogs >= 2)
         {
             return;
@@ -476,6 +633,12 @@ public class PlayerController : MonoBehaviour
 
         if ((isGrounded || coyoteTimer > 0f) && !isCrouching)
         {
+            if (playerStatus != null)
+            {
+                playerStatus.stamina = Mathf.Max(0f, playerStatus.stamina - 6f);
+                if (playerStatus.stamina <= 0.5f) playerStatus.isExhausted = true;
+            }
+
             verticalVelocity = Mathf.Sqrt(2f * jumpHeight * gravity);
             isGrounded = false;
             coyoteTimer = 0f;
@@ -536,6 +699,7 @@ public class PlayerController : MonoBehaviour
 
     private void FixedUpdate()
     {
+        if ((playerStatus != null && playerStatus.IsDead) || Time.timeScale <= 0.001f) return;
         if (isMantling) return;
         MovePlayerPhysics();
     }
@@ -553,6 +717,12 @@ public class PlayerController : MonoBehaviour
         if (isSwimming)
         {
             targetSpeed *= 0.64f;
+            if (IsMoving && playerStatus != null && !playerStatus.IsDead)
+            {
+                playerStatus.stamina = Mathf.Max(0f, playerStatus.stamina - 3.5f * Time.fixedDeltaTime);
+                if (playerStatus.stamina <= 0.5f) playerStatus.isExhausted = true;
+                if (playerStatus.isExhausted) targetSpeed *= 0.72f;
+            }
         }
         else if (curWaterDepth > 0.25f)
         {
@@ -585,6 +755,12 @@ public class PlayerController : MonoBehaviour
         if (!isGrounded) accelRate *= airControl;
 
         currentVelocity = Vector3.MoveTowards(currentVelocity, targetVelocity, accelRate * Time.fixedDeltaTime);
+
+        if (dodgeTimer > 0f)
+        {
+            currentVelocity = dodgeVelocity;
+            dodgeVelocity = Vector3.Lerp(dodgeVelocity, Vector3.zero, Time.fixedDeltaTime * 5.2f);
+        }
 
         if (knockbackTime > 0f)
         {
@@ -629,7 +805,27 @@ public class PlayerController : MonoBehaviour
         float waterSurfaceY = FragaWorldBlueprint.GetWaterSurfaceY(proposedPosition.x, proposedPosition.z);
         float submergeDepth = waterSurfaceY - terrainFloorY;
         float swimSurfaceTargetY = waterSurfaceY - 1.05f;
+        wasSwimming = isSwimming;
         isSwimming = (submergeDepth > 1.05f) && (proposedPosition.y <= swimSurfaceTargetY + 0.12f);
+
+        if (isSwimming && !wasSwimming)
+        {
+            if (GalicianFootstepSurfaceDetector.Instance != null)
+                GalicianFootstepSurfaceDetector.Instance.PlayWaterSplash(proposedPosition, 0.85f);
+            else if (AudioManager.Instance != null)
+                AudioManager.Instance.PlayFoley(AudioManager.FoleyEventType.WaterSplashIn, proposedPosition, 0.80f);
+            swimStrokeFoleyTimer = 0.42f;
+        }
+        else if (isSwimming && IsMoving)
+        {
+            swimStrokeFoleyTimer -= Time.fixedDeltaTime;
+            if (swimStrokeFoleyTimer <= 0f)
+            {
+                swimStrokeFoleyTimer = isSprinting ? 0.50f : 0.72f;
+                if (AudioManager.Instance != null)
+                    AudioManager.Instance.PlayFoley(AudioManager.FoleyEventType.SwimStroke, proposedPosition, 0.46f, 0.88f, 1.08f);
+            }
+        }
 
         bool wasGrounded = isGrounded;
         float currentY = transform.position.y;
@@ -694,10 +890,10 @@ public class PlayerController : MonoBehaviour
                 if (FirstPersonCamera.Instance != null)
                     FirstPersonCamera.Instance.AddLandingDip(peakFallSpeed);
                 if (FirstPersonViewmodelController.Instance != null)
-                    FirstPersonViewmodelController.Instance.TriggerVerticalImpulse(Mathf.Clamp(peakFallSpeed * 0.005f, 0.02f, 0.06f));
+                    FirstPersonViewmodelController.Instance.TriggerLandingDip(peakFallSpeed);
                 if (GalicianFootstepSurfaceDetector.Instance != null)
                 {
-                    GalicianFootstepSurfaceDetector.Instance.PlayFootstep(proposedPosition, true, false);
+                    GalicianFootstepSurfaceDetector.Instance.PlayLandingImpact(proposedPosition, peakFallSpeed);
                 }
                 else if (footstepAudio != null && footstepClips != null && footstepClips.Length > 0)
                 {

@@ -28,24 +28,24 @@ public class GalicianOptimizationManager : MonoBehaviour
 
     [Header("Texture Streaming")]
     public bool enableTextureStreaming = true;
-    public int lowTextureStreamingMemoryPoolMB = 512;
-    public int textureStreamingMemoryPoolMB = 768;
+    public int lowTextureStreamingMemoryPoolMB = 256;
+    public int textureStreamingMemoryPoolMB = 384;
     public int pcTextureStreamingMemoryPoolMB = 2048;
 
     [Header("Sombras Mobile (Performance)")]
-    public float lowShadowDistance = 35.0f;
-    public float mobileShadowDistance = 55.0f;
-    public int mobileShadowCascades = 2;
+    public float lowShadowDistance = 32.0f;
+    public float mobileShadowDistance = 45.0f;
+    public int mobileShadowCascades = 1;
 
     [Header("Sombras PC (Alta Fidelidade)")]
     public float pcShadowDistance = 115.0f;
     public int pcShadowCascades = 4;
 
     [Header("Culling de Camadas (Base Medio)")]
-    public float smallFoliageCullDist = 45.0f;
-    public float propsCullDist = 55.0f;
-    public float wildlifeCullDist = 70.0f;
-    public float largeTreesCullDist = 310.0f;
+    public float smallFoliageCullDist = 34.0f;
+    public float propsCullDist = 44.0f;
+    public float wildlifeCullDist = 60.0f;
+    public float largeTreesCullDist = 200.0f;
 
     public QualityTier CurrentQualityTier { get; private set; } = QualityTier.Medio;
     private readonly float[] cachedCullDistances = new float[32];
@@ -86,8 +86,8 @@ public class GalicianOptimizationManager : MonoBehaviour
             : (CurrentQualityTier == QualityTier.Medio ? targetFrameRate : pcTargetFrameRate);
         Application.targetFrameRate = fps;
         QualitySettings.vSyncCount = disableVSyncForLowLatency ? 0 : 1;
-        QualitySettings.lodBias = CurrentQualityTier == QualityTier.Baixo ? 0.75f
-            : (CurrentQualityTier == QualityTier.Medio ? 1.0f : 1.5f);
+        QualitySettings.lodBias = CurrentQualityTier == QualityTier.Baixo ? 0.72f
+            : (CurrentQualityTier == QualityTier.Medio ? 0.90f : 1.5f);
 
         if (enableTextureStreaming)
         {
@@ -120,16 +120,17 @@ public class GalicianOptimizationManager : MonoBehaviour
         cam.backgroundColor = new Color(0.45f, 0.62f, 0.85f, 1f);
         cam.nearClipPlane = 0.15f;
 
-        float desiredFar = CurrentQualityTier == QualityTier.Baixo ? 380f
-            : (CurrentQualityTier == QualityTier.Medio ? 480f : 720f);
-        if (cam.farClipPlane < 360f || Application.isPlaying) cam.farClipPlane = desiredFar;
+        bool isMobile = Application.isMobilePlatform;
+        float desiredFar = CurrentQualityTier == QualityTier.Baixo ? 240f
+            : (CurrentQualityTier == QualityTier.Medio ? (isMobile ? 300f : 480f) : (isMobile ? 380f : 720f));
+        if (cam.farClipPlane < 240f || Application.isPlaying) cam.farClipPlane = desiredFar;
 
         for (int i = 0; i < 32; i++)
         {
             cachedCullDistances[i] = 0f;
         }
 
-        float mult = CurrentQualityTier == QualityTier.Baixo ? 0.80f
+        float mult = CurrentQualityTier == QualityTier.Baixo ? 0.78f
             : (CurrentQualityTier == QualityTier.Medio ? 1.0f : 1.65f);
         cachedCullDistances[9] = smallFoliageCullDist * mult;
         cachedCullDistances[10] = propsCullDist * mult;
@@ -144,11 +145,26 @@ public class GalicianOptimizationManager : MonoBehaviour
         UniversalRenderPipelineAsset urp = GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset;
         if (urp == null) return;
 
+        bool isMobile = Application.isMobilePlatform;
+        bool isHighDesktop = !isMobile && CurrentQualityTier == QualityTier.Alto;
+
         urp.shadowDistance = CurrentQualityTier == QualityTier.Baixo ? lowShadowDistance
-            : (CurrentQualityTier == QualityTier.Medio ? mobileShadowDistance : pcShadowDistance);
+            : (CurrentQualityTier == QualityTier.Medio ? mobileShadowDistance : (isMobile ? 55f : pcShadowDistance));
         urp.shadowCascadeCount = CurrentQualityTier == QualityTier.Baixo ? 1
-            : (CurrentQualityTier == QualityTier.Medio ? mobileShadowCascades : pcShadowCascades);
-        urp.supportsCameraDepthTexture = true;
-        urp.supportsCameraOpaqueTexture = CurrentQualityTier == QualityTier.Alto;
+            : (CurrentQualityTier == QualityTier.Medio ? mobileShadowCascades : (isMobile ? 2 : pcShadowCascades));
+
+        if (isMobile)
+        {
+            urp.renderScale = CurrentQualityTier == QualityTier.Baixo ? 0.65f
+                : (CurrentQualityTier == QualityTier.Medio ? 0.72f : 0.85f);
+            urp.supportsHDR = false;
+            urp.supportsCameraDepthTexture = false;
+            urp.supportsCameraOpaqueTexture = false;
+        }
+        else
+        {
+            urp.supportsCameraDepthTexture = isHighDesktop;
+            urp.supportsCameraOpaqueTexture = isHighDesktop;
+        }
     }
 }

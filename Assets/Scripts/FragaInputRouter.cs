@@ -39,6 +39,7 @@ public class FragaInputRouter : MonoBehaviour
     public bool WantsSprint { get; private set; }
     public bool JumpPressedThisFrame { get; private set; }
     public bool CrouchPressedThisFrame { get; private set; }
+    public bool DodgePressedThisFrame { get; private set; }
     public bool PrimaryDownThisFrame { get; private set; }
     public bool PrimaryHeld { get; private set; }
     public bool PrimaryUpThisFrame { get; private set; }
@@ -46,6 +47,8 @@ public class FragaInputRouter : MonoBehaviour
     public bool SecondaryHeld { get; private set; }
     public bool SecondaryUpThisFrame { get; private set; }
     public bool InteractPressedThisFrame { get; private set; }
+    public bool InteractHeld { get; private set; }
+    public bool InteractUpThisFrame { get; private set; }
     public bool LightTogglePressedThisFrame { get; private set; }
     public int HotbarKeyPressedThisFrame { get; private set; } = -1; // 0..5
 
@@ -63,8 +66,11 @@ public class FragaInputRouter : MonoBehaviour
     private bool mobileSecondaryDownQueued;
     private bool mobileSecondaryUpQueued;
     private bool mobileInteractQueued;
+    private bool mobileInteractHeld;
+    private bool mobileInteractUpQueued;
     private bool mobileJumpQueued;
     private bool mobileCrouchQueued;
+    private bool mobileDodgeQueued;
     private bool mobileLightQueued;
     private int mobileHotbarQueued = -1;
 
@@ -111,6 +117,12 @@ public class FragaInputRouter : MonoBehaviour
         PlayerPrefs.SetInt("Fraga_ControlLayoutMode", (int)mode);
         PlayerPrefs.Save();
         RecomputeTouchActive(notify: true);
+
+        if (IsTouchControlsActive && Input.touchCount == 0 && !Application.isMobilePlatform)
+        {
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+        }
     }
 
     public void ToggleTouchControls()
@@ -177,7 +189,9 @@ public class FragaInputRouter : MonoBehaviour
         {
             CurrentContext = InputContext.MapOpen;
         }
-        else if (SurvivalInventoryCraftUI.Instance != null && SurvivalInventoryCraftUI.Instance.IsOpen)
+        else if ((SurvivalInventoryCraftUI.Instance != null && SurvivalInventoryCraftUI.Instance.IsOpen) ||
+                 (BlueprintPlacementManager.Instance != null && BlueprintPlacementManager.Instance.IsBookOpen) ||
+                 StorageChestInteractable.IsAnyChestOpen)
         {
             CurrentContext = InputContext.InventoryUI;
         }
@@ -222,7 +236,16 @@ public class FragaInputRouter : MonoBehaviour
         // 2. Botoes discretos
         JumpPressedThisFrame = IsGameplayAllowed && (Input.GetKeyDown(KeyCode.Space) || mobileJumpQueued);
         CrouchPressedThisFrame = IsGameplayAllowed && (Input.GetKeyDown(KeyCode.C) || Input.GetKeyDown(KeyCode.LeftControl) || mobileCrouchQueued);
+        DodgePressedThisFrame = IsGameplayAllowed && (Input.GetKeyDown(KeyCode.LeftAlt) || Input.GetKeyDown(KeyCode.V) || mobileDodgeQueued);
+        bool pcInteractAllowed = IsGameplayAllowed && Input.touchCount == 0;
+        if (!IsGameplayAllowed)
+        {
+            mobileInteractHeld = false;
+        }
         InteractPressedThisFrame = IsGameplayAllowed && (Input.GetKeyDown(KeyCode.E) || mobileInteractQueued);
+        InteractHeld = IsGameplayAllowed && ((pcInteractAllowed && Input.GetKey(KeyCode.E)) || mobileInteractHeld);
+        InteractUpThisFrame = IsGameplayAllowed && ((pcInteractAllowed && Input.GetKeyUp(KeyCode.E)) || mobileInteractUpQueued);
+
         LightTogglePressedThisFrame = (IsGameplayAllowed || CurrentContext == InputContext.BuildPlacement) &&
                                       (Input.GetKeyDown(KeyCode.L) || mobileLightQueued);
 
@@ -253,7 +276,9 @@ public class FragaInputRouter : MonoBehaviour
         // Limpar filas mobile
         mobileJumpQueued = false;
         mobileCrouchQueued = false;
+        mobileDodgeQueued = false;
         mobileInteractQueued = false;
+        mobileInteractUpQueued = false;
         mobileLightQueued = false;
         mobilePrimaryDownQueued = false;
         mobilePrimaryUpQueued = false;
@@ -269,8 +294,11 @@ public class FragaInputRouter : MonoBehaviour
     public void TriggerMobileSecondaryDown() { mobileSecondaryHeld = true; mobileSecondaryDownQueued = true; }
     public void TriggerMobileSecondaryUp() { mobileSecondaryHeld = false; mobileSecondaryUpQueued = true; }
     public void TriggerMobileInteract() { mobileInteractQueued = true; }
+    public void TriggerMobileInteractDown() { mobileInteractHeld = true; mobileInteractQueued = true; }
+    public void TriggerMobileInteractUp() { mobileInteractHeld = false; mobileInteractUpQueued = true; }
     public void TriggerMobileJump() { mobileJumpQueued = true; }
     public void TriggerMobileCrouch() { mobileCrouchQueued = true; }
+    public void TriggerMobileDodge() { mobileDodgeQueued = true; }
     public void TriggerMobileLight() { mobileLightQueued = true; }
     public void TriggerMobileHotbarSlot(int slotIndex) { mobileHotbarQueued = slotIndex; }
 }

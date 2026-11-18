@@ -28,6 +28,7 @@ public class BodyTemperatureSystem : MonoBehaviour
     private float nextCacheRefreshTime = 0f;
     private bool cachedNearFire = false;
     private float shiverTimer = 0f;
+    private float wetColdExposureTimer = 0f;
     private int lastHypoTierAlert = 0;
     private bool alertedWet = false;
 
@@ -36,6 +37,17 @@ public class BodyTemperatureSystem : MonoBehaviour
         Instance = this;
         currentTemperature = 37.0f;
         clothesWetness = 0.0f;
+    }
+
+    public void RestoreSavedThermalState(float temperature, float wetness)
+    {
+        currentTemperature = Mathf.Clamp(temperature > 10f ? temperature : 37.0f, 28.0f, 38.0f);
+        clothesWetness = Mathf.Clamp01(wetness);
+        alertedWet = clothesWetness >= 0.72f;
+        if (currentTemperature <= TIER3_DAMAGE_TEMP) lastHypoTierAlert = 3;
+        else if (currentTemperature <= TIER2_FATIGUE_TEMP) lastHypoTierAlert = 2;
+        else if (currentTemperature <= TIER1_SHIVER_TEMP) lastHypoTierAlert = 1;
+        else lastHypoTierAlert = 0;
     }
 
     private void Start()
@@ -56,13 +68,13 @@ public class BodyTemperatureSystem : MonoBehaviour
         {
             nextFireScanTime = Time.time + 0.45f;
             cachedNearFire = CheckNearCampfire();
-            if (playerStatus != null && cachedNearFire)
+            if (playerStatus != null)
             {
-                playerStatus.isNearBonfire = true;
+                playerStatus.isNearBonfire = cachedNearFire;
             }
         }
 
-        bool isNearFire = cachedNearFire || (playerStatus != null && playerStatus.isNearBonfire);
+        bool isNearFire = cachedNearFire;
         float insulation = inventoryCache != null ? inventoryCache.GetColdInsulation() : 0f;
 
         if (isNearFire)
@@ -108,6 +120,24 @@ public class BodyTemperatureSystem : MonoBehaviour
             }
         }
 
+        // Exposicao prolongada ao frio encharcado pode causar hipotermia/mal-estar (isSick)
+        if (!isNearFire && clothesWetness >= 0.85f && currentTemperature <= TIER2_FATIGUE_TEMP && playerStatus != null)
+        {
+            wetColdExposureTimer += Time.deltaTime;
+            if (wetColdExposureTimer >= 18f)
+            {
+                wetColdExposureTimer = 0f;
+                if (!playerStatus.isSick)
+                {
+                    playerStatus.ApplySickness(60f);
+                }
+            }
+        }
+        else
+        {
+            wetColdExposureTimer = Mathf.Max(0f, wetColdExposureTimer - Time.deltaTime * 0.5f);
+        }
+
         HandleHypothermiaEffects();
     }
 
@@ -122,9 +152,9 @@ public class BodyTemperatureSystem : MonoBehaviour
         {
             lastHypoTierAlert = hypoTier;
             if (hypoTier == 1)
-                HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#77CCFF>Frio intenso! Aqueca-se na fogueira ou vista Casaco.</color>");
+                HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#77CCFF>Frio intenso! Esquente-se na fogueira ou vista Casaco.</color>");
             else if (hypoTier == 2)
-                HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#55AAFF>Hipotermia: Estamina limitada pelo frio!</color>");
+                HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#55AAFF>Hipotermia: Folego limitado pelo frio!</color>");
             else if (hypoTier == 3)
                 HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#FF5555>HIPOTERMIA SEVERA: Perdendo vida! Acenda fogo ou tome Cha!</color>");
         }
@@ -153,11 +183,6 @@ public class BodyTemperatureSystem : MonoBehaviour
             }
         }
 
-        if (currentTemperature <= TIER2_FATIGUE_TEMP && playerStatus != null)
-        {
-            playerStatus.stamina = Mathf.Min(playerStatus.stamina, 40f);
-        }
-
         if (currentTemperature <= TIER3_DAMAGE_TEMP && playerStatus != null)
         {
             playerStatus.TakeDamagePassive(0.40f * Time.deltaTime);
@@ -177,8 +202,11 @@ public class BodyTemperatureSystem : MonoBehaviour
         currentTemperature = 37.0f;
         clothesWetness = 0.0f;
         shiverTimer = 0f;
+        wetColdExposureTimer = 0f;
         lastHypoTierAlert = 0;
         alertedWet = false;
+        cachedNearFire = false;
+        if (playerStatus != null) playerStatus.isNearBonfire = false;
     }
 
     private bool CheckNearCampfire()

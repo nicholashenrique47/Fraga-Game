@@ -328,6 +328,20 @@ public class ProceduralMaterialGenerator : MonoBehaviour
         SaveMaterialAsset(mat, dir, name);
     }
 
+    private static Texture2D SaveProceduralTextureAsPNG(Texture2D tempTex, string fileName, bool isNormalMap, int maxSize = 512)
+    {
+        if (tempTex == null) return null;
+        string path = $"{TEX_DIR}/{fileName}";
+        if (!File.Exists(path))
+        {
+            if (!Directory.Exists(TEX_DIR)) Directory.CreateDirectory(TEX_DIR);
+            File.WriteAllBytes(path, tempTex.EncodeToPNG());
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+        }
+        DestroyImmediate(tempTex);
+        return LoadPBRTexture(fileName, isNormalMap, false, maxSize);
+    }
+
     private static Texture2D LoadPBRTexture(string fileName, bool isNormalMap, bool isCutoutAlpha, int maxSize = 1024)
     {
         if (string.IsNullOrEmpty(fileName)) return null;
@@ -359,6 +373,18 @@ public class ProceduralMaterialGenerator : MonoBehaviour
             {
                 if (importer.wrapMode != TextureWrapMode.Repeat) { importer.wrapMode = TextureWrapMode.Repeat; dirty = true; }
                 if (importer.anisoLevel < 4) { importer.anisoLevel = 4; dirty = true; }
+            }
+
+            TextureImporterPlatformSettings androidSettings = importer.GetPlatformTextureSettings("Android");
+            int androidMax = Mathf.Min(maxSize, 512);
+            if (!androidSettings.overridden || androidSettings.maxTextureSize > androidMax || androidSettings.textureCompression != TextureImporterCompression.Compressed)
+            {
+                androidSettings.name = "Android";
+                androidSettings.overridden = true;
+                androidSettings.maxTextureSize = androidMax;
+                androidSettings.textureCompression = TextureImporterCompression.Compressed;
+                importer.SetPlatformTextureSettings(androidSettings);
+                dirty = true;
             }
 
             if (dirty)
@@ -423,12 +449,9 @@ public class ProceduralMaterialGenerator : MonoBehaviour
         mat.SetTexture("_BumpMap", normalTex);
         mat.EnableKeyword("_NORMALMAP");
 
-        Texture2D rockTex = LoadPBRTexture("granite_albedo.png", false, false, 1024)
-            ?? AssetDatabase.LoadAssetAtPath<Texture2D>(dir + "/Ruin_Stones_Tex.asset");
-        Texture2D rockNormal = LoadPBRTexture("granite_normal.png", true, false, 1024)
-            ?? AssetDatabase.LoadAssetAtPath<Texture2D>(dir + "/Ruin_Stones_Normal.asset");
-        Texture2D detailNormal = LoadPBRTexture("moss_normal.png", true, false, 512)
-            ?? AssetDatabase.LoadAssetAtPath<Texture2D>(dir + "/Mat_Meadow_Grass_Normal.asset");
+        Texture2D rockTex = LoadPBRTexture("granite_albedo.png", false, false, 1024);
+        Texture2D rockNormal = LoadPBRTexture("granite_normal.png", true, false, 1024);
+        Texture2D detailNormal = LoadPBRTexture("moss_normal.png", true, false, 512);
 
         if (rockTex != null) mat.SetTexture("_RockMap", rockTex);
         if (rockNormal != null) mat.SetTexture("_RockNormalMap", rockNormal);
@@ -673,15 +696,14 @@ public class ProceduralMaterialGenerator : MonoBehaviour
         mat.SetFloat("_Metallic", metallic);
         mat.enableInstancing = true;
 
-        Texture2D tex = GenerateNoiseTexture(512, baseColor, 0.15f);
+        string slug = name.StartsWith("Mat_") ? name.Substring(4).ToLowerInvariant() : name.ToLowerInvariant();
+        Texture2D tex = SaveProceduralTextureAsPNG(GenerateNoiseTexture(512, baseColor, 0.15f), $"{slug}_albedo.png", false, 512);
         mat.SetTexture("_BaseMap", tex);
 
-        Texture2D normalTex = GenerateNormalMap(512, 0.5f);
+        Texture2D normalTex = SaveProceduralTextureAsPNG(GenerateNormalMap(512, 0.5f), $"{slug}_normal.png", true, 512);
         mat.SetTexture("_BumpMap", normalTex);
         mat.EnableKeyword("_NORMALMAP");
 
-        AssetDatabase.CreateAsset(tex, dir + "/" + name + "_Tex.asset");
-        AssetDatabase.CreateAsset(normalTex, dir + "/" + name + "_Normal.asset");
         SaveMaterialAsset(mat, dir, name);
     }
 

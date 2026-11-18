@@ -281,7 +281,7 @@ public class TerrainMeshGenerator : MonoBehaviour
 
         MeshRenderer mr = chunkObj.AddComponent<MeshRenderer>();
         mr.sharedMaterial = groundMat;
-        mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
+        mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         mr.receiveShadows = true;
 
         MeshCollider mc = chunkObj.AddComponent<MeshCollider>();

@@ -27,6 +27,8 @@ public class PlayerStatus : MonoBehaviour
     [Range(0f, 100f)] public float health = 100f;
     public event System.Action OnDeath;
     private bool isDead = false;
+    public bool IsDead => isDead;
+    public bool IsComfortRegenActive { get; private set; }
 
     [Header("Temperatura")]
     [Range(-20f, 40f)] public float bodyTemperature = 37f;
@@ -39,6 +41,7 @@ public class PlayerStatus : MonoBehaviour
 
     [Header("Status Effects")]
     public bool isSprinting = false;
+    public bool isExhausted = false;
     public bool isNearBonfire = false;
     public bool isStarving = false;
     public bool isFreezing = false;
@@ -82,9 +85,12 @@ public class PlayerStatus : MonoBehaviour
         thirst = 100f;
         bodyTemperature = 37.0f;
         isDead = false;
+        IsComfortRegenActive = false;
+        isExhausted = false;
         isStarving = false;
         isFreezing = false;
         isPoisoned = false;
+        poisonTimer = 0f;
         isBleeding = false;
         isFractured = false;
         isSick = false;
@@ -118,6 +124,8 @@ public class PlayerStatus : MonoBehaviour
 
     private void Update()
     {
+        if (isDead) return;
+
         if (stamina < 25f && Time.time - lastBreathingTime > 5f)
         {
             lastBreathingTime = Time.time;
@@ -133,13 +141,12 @@ public class PlayerStatus : MonoBehaviour
                 FirstPersonCamera.Instance.AddShake(0.03f);
         }
 
-        if (isDead) return;
         UpdateHungerAndThirst();
         UpdateTemperature();
-        UpdateStamina();
         UpdatePoison();
         UpdateSickness();
         ApplyStatusEffects();
+        UpdateStamina();
     }
 
     public void TakeDamage(float amount)
@@ -162,6 +169,10 @@ public class PlayerStatus : MonoBehaviour
         }
 
         health -= amount;
+        if (amount > 0.5f && AudioManager.Instance != null)
+        {
+            AudioManager.Instance.PlayFoley(AudioManager.FoleyEventType.PainGrunt, transform.position, Mathf.Clamp(0.45f + amount * 0.01f, 0.45f, 0.88f), 0.90f, 1.08f);
+        }
 
         if (ppManagerCache != null)
         {
@@ -184,6 +195,7 @@ public class PlayerStatus : MonoBehaviour
         if (isDead) return;
         isDead = true;
         health = 0f;
+        IsComfortRegenActive = false;
         OnDeath?.Invoke();
 
         if (ppManagerCache != null)
@@ -199,6 +211,8 @@ public class PlayerStatus : MonoBehaviour
     public void Revive()
     {
         isDead = false;
+        IsComfortRegenActive = false;
+        isExhausted = false;
         health = 100f;
         stamina = 100f;
         hunger = 100f;
@@ -228,7 +242,8 @@ public class PlayerStatus : MonoBehaviour
 
     private void UpdateHungerAndThirst()
     {
-        float activityMult = isSprinting ? 1.45f : 1.0f;
+        bool isSwimming = playerController != null && playerController.isSwimming;
+        float activityMult = isSprinting ? 1.45f : (isSwimming ? 1.35f : 1.0f);
         hunger -= hungerDrainRate * activityMult * Time.deltaTime;
         thirst -= thirstDrainRate * activityMult * Time.deltaTime;
 
@@ -246,6 +261,15 @@ public class PlayerStatus : MonoBehaviour
 
         if (isStarving) TakeDamagePassive(starvationHealthDamage * Time.deltaTime);
         if (isDehydrated) TakeDamagePassive(dehydrationHealthDamage * Time.deltaTime);
+
+        bool comfortReady = !isDead && hunger >= 75f && thirst >= 75f && bodyTemperature >= 36.2f
+            && !isBleeding && !isPoisoned && !isSick && !isFreezing;
+        IsComfortRegenActive = comfortReady && health < 100f;
+        if (IsComfortRegenActive)
+        {
+            float regenHp = isNearBonfire ? 0.80f : 0.35f;
+            health = Mathf.Min(100f, health + regenHp * Time.deltaTime);
+        }
 
         if (hunger > 30f) alertedLowHunger = false;
         if (hunger > 5f) alertedStarving = false;
@@ -325,12 +349,25 @@ public class PlayerStatus : MonoBehaviour
         if (health <= 0f) Die();
     }
 
+    public float EffectiveMaxStamina
+    {
+        get
+        {
+            float max = 100f;
+            if (bodyTemperature <= BodyTemperatureSystem.TIER2_FATIGUE_TEMP) max -= 40f;
+            if (isSick) max -= 15f;
+            if (thirst <= 10f) max -= 15f;
+            return Mathf.Clamp(max, 45f, 100f);
+        }
+    }
+
     private void UpdateStamina()
     {
+        float maxStam = EffectiveMaxStamina;
         // Sincronizado exclusivamente com PlayerController / FragaInputRouter (PC + Mobile)
         if (playerController != null)
         {
-            isSprinting = playerController.isSprinting && playerController.IsMoving && stamina > 0f;
+            isSprinting = playerController.isSprinting && playerController.IsMoving && !isExhausted && stamina > 0f;
         }
 
         if (isSprinting && stamina > 0f)
@@ -343,12 +380,36 @@ public class PlayerStatus : MonoBehaviour
             stamina += staminaRegenRate * Time.deltaTime;
         }
 
-        stamina = Mathf.Clamp(stamina, 0f, 100f);
+        stamina = Mathf.Clamp(stamina, 0f, maxStam);
 
-        if (stamina <= 0f)
+        if (stamina <= 0.5f)
+        {
+            isExhausted = true;
+        }
+        else if (isExhausted && stamina >= 18f)
+        {
+            isExhausted = false;
+        }
+
+        if (stamina <= 0f || isExhausted)
         {
             isSprinting = false;
         }
+    }
+
+    public bool CanSpendStamina(float minRequired = 0.5f)
+    {
+        return !isExhausted && stamina >= minRequired;
+    }
+
+    public void ApplyBleeding()
+    {
+        isBleeding = true;
+    }
+
+    public void ApplyFracture()
+    {
+        isFractured = true;
     }
 
     private void UpdatePoison()
@@ -396,6 +457,7 @@ public class PlayerStatus : MonoBehaviour
 
     public void Eat(float hungerRestore, float sanityRestore)
     {
+        if (isDead) return;
         hunger = Mathf.Clamp(hunger + hungerRestore, 0f, 100f);
         if (sanitySystem != null)
         {
@@ -405,22 +467,25 @@ public class PlayerStatus : MonoBehaviour
 
     public void Drink(float thirstRestore)
     {
+        if (isDead) return;
         thirst = Mathf.Clamp(thirst + thirstRestore, 0f, 100f);
     }
 
     public void Heal(float healthRestore)
     {
+        if (isDead) return;
         health = Mathf.Clamp(health + healthRestore, 0f, 100f);
     }
 
     public void RestoreStamina(float amount)
     {
-        stamina = Mathf.Clamp(stamina + amount, 0f, 100f);
+        if (isDead) return;
+        stamina = Mathf.Clamp(stamina + amount, 0f, EffectiveMaxStamina);
     }
 
     public void StartSprint()
     {
-        if (stamina > 10f) isSprinting = true;
+        if (!isExhausted && stamina > 10f) isSprinting = true;
     }
 
     public void StopSprint()
@@ -432,12 +497,17 @@ public class PlayerStatus : MonoBehaviour
     {
         staminaRegenRate = (hunger < 20f) ? 3f : 8f;
         if (isSick) staminaRegenRate *= 0.65f;
+        if (isNearBonfire && !isStarving && !isFreezing) staminaRegenRate *= 1.15f;
+        if (PlayerMeleeCombatDefense.Instance != null && PlayerMeleeCombatDefense.Instance.isBlocking)
+        {
+            staminaRegenRate *= 0.15f;
+        }
 
         if (isBleeding)
         {
             TakeDamagePassive(bleedingHealthDamage * Time.deltaTime);
             if (!wasBleeding && HUDSurvivalOverlay.Instance != null)
-                HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#FF4444>SANGRAMENTO: Use Ligaduras ou Pomada de Resina!</color>");
+                HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#FF4444>SANGRAMENTO: Use Ataduras ou Pomada de Resina!</color>");
         }
         wasBleeding = isBleeding;
 
@@ -461,7 +531,13 @@ public class PlayerStatus : MonoBehaviour
             if (isFractured) speedPenalty -= 0.30f;
             speedPenalty = Mathf.Max(speedPenalty, 0.4f);
 
-            playerController.moveSpeed = basePlayerSpeed * speedPenalty;
+            if (inventoryCache == null) inventoryCache = InventoryAdvanced.Instance;
+            if (inventoryCache != null)
+            {
+                speedPenalty *= inventoryCache.GetMoveSpeedMultiplier();
+            }
+
+            playerController.moveSpeed = basePlayerSpeed * Mathf.Max(0.32f, speedPenalty);
         }
     }
 }

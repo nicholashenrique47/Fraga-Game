@@ -122,7 +122,12 @@ Shader "Fraga/FoliageSway_Instanced"
                 Light mainLight = GetMainLight(TransformWorldToShadowCoord(input.positionWS));
                 float NdotL = saturate(dot(normalWS, mainLight.direction));
                 float atten = lerp(0.38, 1.0, mainLight.shadowAttenuation);
-                float sss = pow(saturate(dot(viewDir, -mainLight.direction)), 2.2) * 0.9;
+                float sssDot = saturate(dot(viewDir, -mainLight.direction));
+            #if defined(SHADER_API_MOBILE)
+                float sss = (sssDot * sssDot) * 0.9;
+            #else
+                float sss = pow(max(sssDot, 1e-4), 2.2) * 0.9;
+            #endif
                 half3 direct = (albedo.rgb * NdotL + _TranslucencyColor.rgb * albedo.rgb * sss) * mainLight.color * atten;
 
                 InputData inputData = (InputData)0;

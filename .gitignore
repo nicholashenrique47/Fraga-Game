@@ -112,6 +112,7 @@ InitTestScene*.unity*
 __pycache__/
 *.pyc
 /*screenshot*.png
+/Screenshot_*.jpg
 /temp_*.png
 /tools/
 /plan_builder/

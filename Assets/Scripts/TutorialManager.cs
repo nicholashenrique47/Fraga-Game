@@ -21,6 +21,7 @@ public class TutorialManager : MonoBehaviour
     private int lastWoodCount = -1;
     private int lastFiberCount = -1;
     private int lastDisplayedState = -1;
+    private bool lastTouchLayout = false;
 
     public int CurrentStep => tutorialState;
 
@@ -48,6 +49,11 @@ public class TutorialManager : MonoBehaviour
         PushObjectiveUI(forceToast: false);
     }
 
+    private bool IsTouchActive()
+    {
+        return FragaInputRouter.Instance != null && FragaInputRouter.Instance.IsTouchControlsActive;
+    }
+
     private void ResolveDependencies()
     {
         if (playerTransform == null && PlayerController.Instance != null) playerTransform = PlayerController.Instance.transform;
@@ -62,6 +68,13 @@ public class TutorialManager : MonoBehaviour
         if (tutorialState >= 99) return;
         stateTimer += Time.deltaTime;
 
+        bool touchNow = IsTouchActive();
+        if (touchNow != lastTouchLayout)
+        {
+            lastDisplayedState = -1;
+            PushObjectiveUI(forceToast: false);
+        }
+
         if (Time.time < nextPollTime) return;
         nextPollTime = Time.time + 0.35f;
 
@@ -72,7 +85,7 @@ public class TutorialManager : MonoBehaviour
         int wood = inventory.GetItemCount(100);
         int herbs = inventory.GetItemCount(103);
         int rope = inventory.GetItemCount(118);
-        bool hasAxeOrHigher = inventory.HasItem(300) || inventory.HasItem(301) || inventory.HasItem(302) || inventory.HasItem(305) || inventory.HasItem(306);
+        bool hasAxeOrHigher = inventory.HasItem(300) || inventory.HasItem(301) || inventory.HasItem(312);
 
         switch (tutorialState)
         {
@@ -115,14 +128,14 @@ public class TutorialManager : MonoBehaviour
                 }
                 break;
 
-            case 3: // Criar ou aquecer-se na Fogueira
+            case 3: // Cortar Arvore/Rocha ou Aquecer-se na Fogueira
                 if (inventory.HasItem(400) || (playerStatus != null && playerStatus.isNearBonfire && stateTimer >= 2.5f))
                 {
                     AdvanceTo(4);
                 }
                 break;
 
-            case 4: // Construir Refugio ou Cabana (B / OBRA)
+            case 4: // Construir Refugio ou Cabana
                 if (FindAnyObjectByType<ShelterInteractable>() != null || (dayNightCycle != null && dayNightCycle.currentDay >= 2))
                 {
                     AdvanceTo(5);
@@ -146,6 +159,12 @@ public class TutorialManager : MonoBehaviour
         PushObjectiveUI(forceToast: true);
     }
 
+    public void RefreshUIForCurrentLayout()
+    {
+        lastDisplayedState = -1;
+        PushObjectiveUI(forceToast: false);
+    }
+
     private void PushObjectiveUI(bool forceToast)
     {
         if (HUDSurvivalOverlay.Instance == null)
@@ -154,6 +173,8 @@ public class TutorialManager : MonoBehaviour
             return;
         }
 
+        bool touch = IsTouchActive();
+        lastTouchLayout = touch;
         lastDisplayedState = tutorialState;
 
         if (tutorialState >= 99)
@@ -174,24 +195,34 @@ public class TutorialManager : MonoBehaviour
                 int s = inventory != null ? inventory.GetItemCount(101) : 0;
                 int w = inventory != null ? inventory.GetItemCount(100) : 0;
                 int h = inventory != null ? inventory.GetItemCount(103) : 0;
-                title = "OBJETIVO 1/5: COLETAR RECURSOS";
-                detail = $"Pedras {Mathf.Min(s, 2)}/2 | Galhos {Mathf.Min(w, 3)}/3 | Ervas {Mathf.Min(h, 2)}/2 (chao/arbustos)";
+                title = touch ? "OBJETIVO 1/5: COLETAR DO CHAO (TOQUE PEGAR)" : "OBJETIVO 1/5: COLETAR DO CHAO COM [E]";
+                detail = touch
+                    ? $"Mire no chao e toque em PEGAR: Pedras {Mathf.Min(s, 2)}/2 | Galhos {Mathf.Min(w, 3)}/3 | Ervas {Mathf.Min(h, 2)}/2"
+                    : $"Olhe para o chao e aperte [E]: Pedras {Mathf.Min(s, 2)}/2 | Galhos {Mathf.Min(w, 3)}/3 | Ervas {Mathf.Min(h, 2)}/2";
                 break;
             case 1:
-                title = "OBJETIVO 2/5: CORDA DE FIBRA";
-                detail = "Abra CRAFT [I] e crie Corda de Fibra (2 Ervas).";
+                title = touch ? "OBJETIVO 2/5: FAZER CORDA (MOCHILA)" : "OBJETIVO 2/5: FAZER CORDA DE FIBRA [I]";
+                detail = touch
+                    ? "Toque em MOCHILA (Fabricacao) e crie 'Corda de Fibra (x2)' (usa 2 Ervas)."
+                    : "Aperte [I] (Fabricacao) e clique em 'Corda de Fibra (x2)' (usa 2 Ervas).";
                 break;
             case 2:
-                title = "OBJETIVO 3/5: MACHADO DE PEDRA";
-                detail = "Abra CRAFT [I] e crie o Machado de Pedra (3 Madeira, 2 Pedra, 1 Corda).";
+                title = touch ? "OBJETIVO 3/5: FAZER MACHADO (MOCHILA)" : "OBJETIVO 3/5: FAZER MACHADO DE PEDRA [I]";
+                detail = touch
+                    ? "Toque em MOCHILA e crie 'Machado de Pedra' (3 Madeira + 2 Pedra + 1 Corda)."
+                    : "Aperte [I] e crie o 'Machado de Pedra' (3 Madeira + 2 Pedra + 1 Corda).";
                 break;
             case 3:
-                title = "OBJETIVO 4/5: FOGUEIRA & CALOR";
-                detail = "Aproxime-se da Fogueira do acampamento ou crie um Kit de Fogueira.";
+                title = "OBJETIVO 4/5: CORTAR COM MACHADO & FOGUEIRA";
+                detail = touch
+                    ? "Com o Machado, toque em CORTAR perto de Arvores/Rochas e se aqueca na Fogueira."
+                    : "Use Machado no CLIQUE DO MOUSE em Arvores/Rochas e se aqueca na Fogueira [E].";
                 break;
             case 4:
-                title = "OBJETIVO 5/5: CONSTRUIR ABRIGO";
-                detail = "Pressione [B] (ou OBRA) para posicionar um Refugio de Fentos.";
+                title = touch ? "OBJETIVO 5/5: LIVRO DE CONSTRUCAO (OBRA)" : "OBJETIVO 5/5: LIVRO DE CONSTRUCAO [B]";
+                detail = touch
+                    ? "Toque em OBRA para abrir o Livro de Sobrevivencia e posicionar um Refugio."
+                    : "Pressione [B] para abrir o Livro de Sobrevivencia e posicionar um Refugio.";
                 break;
             default:
                 title = "SOBREVIVA A 1a NOITE";
@@ -200,14 +231,9 @@ public class TutorialManager : MonoBehaviour
         }
 
         HUDSurvivalOverlay.Instance.SetObjectiveDisplay(true, title, detail);
-
         if (forceToast)
         {
-            HUDSurvivalOverlay.Instance.ShowLootTooltip($"<color=#55DDFF>{title}</color>");
-        }
-        else if (uiManager != null && tutorialState == 0)
-        {
-            uiManager.SetLootTooltip($"{title}\n{detail}");
+            HUDSurvivalOverlay.Instance.ShowLootTooltip($"<color=#88EEFF>{title}</color>");
         }
     }
 }

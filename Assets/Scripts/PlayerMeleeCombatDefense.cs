@@ -69,7 +69,8 @@ public class PlayerMeleeCombatDefense : MonoBehaviour
     public void StartBlock()
     {
         if (isBlocking) return;
-        if (playerStatus != null && playerStatus.stamina < 8f) return;
+        if (playerStatus != null && (playerStatus.IsDead || playerStatus.isExhausted || playerStatus.stamina < 8f)) return;
+        if (LogCarryingSystem.Instance != null && LogCarryingSystem.Instance.currentLogs > 0) return;
 
         isBlocking = true;
         blockStartTime = Time.time;
@@ -145,11 +146,20 @@ public class PlayerMeleeCombatDefense : MonoBehaviour
             {
                 StopBlock();
                 if (HUDSurvivalOverlay.Instance != null)
-                    HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#FF5555>Guarda Quebrada (Sem Estamina)!</color>");
+                    HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#FF5555>Defesa Quebrada (Sem Folego)!</color>");
             }
         }
 
-        if (audioSource != null && blockClip != null)
+        if (hasShield && inventoryCache != null)
+        {
+            inventoryCache.DamageEquippedTool(EquipSlotType.OffHand, 1f);
+        }
+
+        if (AudioManager.Instance != null)
+        {
+            AudioManager.Instance.PlayFoley(AudioManager.FoleyEventType.ShieldBlock, transform.position, 0.80f, 0.92f, 1.08f);
+        }
+        else if (audioSource != null && blockClip != null)
         {
             audioSource.pitch = Random.Range(0.92f, 1.08f);
             audioSource.PlayOneShot(blockClip, 0.8f);

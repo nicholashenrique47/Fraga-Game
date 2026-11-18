@@ -42,17 +42,29 @@ public class LootContainer : MonoBehaviour
         isOpened = true;
         
         // Efeitos Visuais / Sonoros
-        AudioManager am = FindAnyObjectByType<AudioManager>();
-        if (am != null) am.PlayPickupSound();
+        AudioManager am = AudioManager.Instance ?? FindAnyObjectByType<AudioManager>();
+        if (am != null) am.PlayFoley(AudioManager.FoleyEventType.ChestWoodLatch, transform.position, 0.76f);
 
         if (HUDSurvivalOverlay.Instance != null && !string.IsNullOrEmpty(foundSummary))
             HUDSurvivalOverlay.Instance.ShowLootTooltip($"<color=#88FFAA>{containerName}: {foundSummary}</color>");
         
         // Abrir a caixa ou mudar textura
-        MeshRenderer mr = GetComponent<MeshRenderer>();
-        if (mr != null)
+        Transform lid = transform.Find("Crate_Lid");
+        if (lid != null)
         {
-            mr.material.color = Color.gray; // Feedback visual de que está vazio
+            lid.localPosition = new Vector3(0f, 0.68f, -0.18f);
+            lid.localEulerAngles = new Vector3(-28f, 0f, -2.5f);
+        }
+
+        MaterialPropertyBlock mpb = new MaterialPropertyBlock();
+        Renderer[] renderers = GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            if (renderers[i] == null) continue;
+            renderers[i].GetPropertyBlock(mpb);
+            mpb.SetColor("_BaseColor", new Color(0.45f, 0.45f, 0.45f, 1f));
+            mpb.SetColor("_Color", new Color(0.45f, 0.45f, 0.45f, 1f));
+            renderers[i].SetPropertyBlock(mpb);
         }
     }
 }

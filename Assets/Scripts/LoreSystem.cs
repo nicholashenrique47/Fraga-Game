@@ -13,11 +13,11 @@ public class LoreSystem : MonoBehaviour
 
     private readonly string[] lorePages = new string[]
     {
-        "Dia 12. Os vultos continuam a observar-me. Sinto o frio deles a noite.",
-        "Dia 23. Encontrei as velhas ruinas celtas. O ar aqui e pesado, mas sinto-me protegido.",
-        "Dia 34. A Santa Companha cruzou a floresta ontem a noite. Escondi-me, nao respirei.",
-        "Dia 40. O Vulto Anciao... Ele e a fonte de tudo isto. Preciso de encontrar o altar.",
-        "Dia 41. Se alguem ler isto... Ofereca o Coracao Sombrio ao Altar de Purificacao. Salve-nos.",
+        "Dia 12. Os vultos continuam me observando. Sinto o frio deles a noite.",
+        "Dia 23. Encontrei as velhas ruinas celtas. O ar aqui e pesado, mas me sinto protegido.",
+        "Dia 34. A Santa Companha cruzou a floresta ontem a noite. Eu me escondi e nem respirei.",
+        "Dia 40. O Vulto Anciao... Ele e a fonte de tudo isso. Preciso encontrar o altar.",
+        "Dia 41. Se alguem ler isso... Ofereca o Coracao Sombrio ao Altar de Purificacao. Nos salve.",
         "Diario do Faroleiro: A luz do farol afasta a nevoa, mas as sombras sobem do oceano a cada lua cheia."
     };
 
@@ -51,8 +51,13 @@ public class LoreSystem : MonoBehaviour
             }
             if (AudioManager.Instance != null)
             {
-                AudioManager.Instance.PlayPickupSound();
+                Vector3 pos = PlayerController.Instance != null ? PlayerController.Instance.transform.position : Vector3.zero;
+                AudioManager.Instance.PlayFoley(AudioManager.FoleyEventType.WeaponInspect, pos, 0.65f, 0.95f, 1.05f);
             }
+        }
+        if (FirstPersonViewmodelController.Instance != null)
+        {
+            FirstPersonViewmodelController.Instance.TriggerConsumeAnimation(FirstPersonViewmodelController.ConsumeAnimKind.ReadNote);
         }
 
         string header = string.IsNullOrEmpty(title) ? $"Diario ({idx + 1}/{lorePages.Length})" : title;

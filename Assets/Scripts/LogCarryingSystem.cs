@@ -117,9 +117,9 @@ public class LogCarryingSystem : MonoBehaviour
         foreach (var c in hits)
         {
             if (c == null) continue;
-            string objName = c.gameObject.name.ToLower();
+            string objName = c.gameObject.name;
 
-            if (objName.Contains("felled_wood_log") || objName.Contains("droppedwood"))
+            if (objName.IndexOf("felled_wood_log", System.StringComparison.OrdinalIgnoreCase) >= 0 || objName.IndexOf("droppedwood", System.StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 PickupLog();
                 Destroy(c.gameObject);
@@ -146,13 +146,21 @@ public class LogCarryingSystem : MonoBehaviour
         return true;
     }
 
+    public void ClearCarriedLogs()
+    {
+        currentLogs = 0;
+        UpdateVisualLogMounts();
+    }
+
     public void PickupLog()
     {
         if (currentLogs >= MAX_LOGS) return;
         currentLogs++;
         UpdateVisualLogMounts();
 
-        if (audioSource != null && pickupClip != null)
+        if (AudioManager.Instance != null)
+            AudioManager.Instance.PlayFoley(AudioManager.FoleyEventType.PickupWood, transform.position, 0.78f, 0.90f, 1.08f);
+        else if (audioSource != null && pickupClip != null)
         {
             audioSource.pitch = Random.Range(0.92f, 1.08f);
             audioSource.PlayOneShot(pickupClip, 0.85f);
@@ -189,7 +197,9 @@ public class LogCarryingSystem : MonoBehaviour
             rb.AddForce(force, ForceMode.Impulse);
             rb.AddTorque(Random.insideUnitSphere * 12f, ForceMode.Impulse);
 
-            if (audioSource != null && throwClip != null)
+            if (AudioManager.Instance != null)
+                AudioManager.Instance.PlayFoley(AudioManager.FoleyEventType.SwingHeavy, spawnPos, 0.72f, 0.92f, 1.06f);
+            else if (audioSource != null && throwClip != null)
             {
                 audioSource.pitch = Random.Range(0.95f, 1.05f);
                 audioSource.PlayOneShot(throwClip, 0.9f);
@@ -198,7 +208,9 @@ public class LogCarryingSystem : MonoBehaviour
         else
         {
             rb.linearVelocity = transform.forward * 1.5f + Vector3.down * 0.5f;
-            if (audioSource != null && dropClip != null)
+            if (AudioManager.Instance != null)
+                AudioManager.Instance.PlayFoley(AudioManager.FoleyEventType.PickupWood, spawnPos, 0.75f, 0.78f, 0.92f);
+            else if (audioSource != null && dropClip != null)
             {
                 audioSource.pitch = Random.Range(0.92f, 1.08f);
                 audioSource.PlayOneShot(dropClip, 0.8f);
@@ -208,6 +220,7 @@ public class LogCarryingSystem : MonoBehaviour
         ResourcePickup pickup = logObj.AddComponent<ResourcePickup>();
         pickup.itemID = 100;
         pickup.amount = 2;
+        pickup.disableAutoMagnet = true;
 
         if (HUDSurvivalOverlay.Instance != null)
             HUDSurvivalOverlay.Instance.ShowLootTooltip(throwForward ? "Tora arremessada!" : "Tora depositada no solo.");
@@ -225,18 +238,24 @@ public class LogCarryingSystem : MonoBehaviour
 
     private AudioClip GeneratePickupLogSound()
     {
-        int sampleRate = 44100;
+        int sampleRate = 22050;
         float duration = 0.28f;
         int sampleCount = (int)(sampleRate * duration);
         float[] samples = new float[sampleCount];
+        uint seed = 41021u;
+        float lp1 = 0f, lp2 = 0f;
 
         for (int i = 0; i < sampleCount; i++)
         {
             float t = (float)i / sampleCount;
             float env = Mathf.Exp(-14f * t);
+            seed = seed * 1664525u + 1013904223u;
+            float w = ((seed >> 16) / 65535f) * 2f - 1f;
+            lp1 = Mathf.Lerp(lp1, w, 0.20f);
+            lp2 = Mathf.Lerp(lp2, lp1, 0.06f);
             float thud = Mathf.Sin(2f * Mathf.PI * 90f * ((float)i / sampleRate)) * env * 0.7f;
-            float rustle = Random.Range(-0.35f, 0.35f) * Mathf.Exp(-6f * t);
-            samples[i] = thud + rustle;
+            float rustle = (lp1 - lp2) * Mathf.Exp(-7f * t) * 0.42f;
+            samples[i] = Mathf.Clamp(thud + rustle, -1f, 1f);
         }
 
         AudioClip clip = AudioClip.Create("PickupLog_Procedural", sampleCount, 1, sampleRate, false);
@@ -246,18 +265,23 @@ public class LogCarryingSystem : MonoBehaviour
 
     private AudioClip GenerateDropLogSound()
     {
-        int sampleRate = 44100;
+        int sampleRate = 22050;
         float duration = 0.35f;
         int sampleCount = (int)(sampleRate * duration);
         float[] samples = new float[sampleCount];
+        uint seed = 51029u;
+        float lp = 0f;
 
         for (int i = 0; i < sampleCount; i++)
         {
             float t = (float)i / sampleCount;
             float env = Mathf.Exp(-11f * t);
+            seed = seed * 1664525u + 1013904223u;
+            float w = ((seed >> 16) / 65535f) * 2f - 1f;
+            lp = Mathf.Lerp(lp, w, 0.14f);
             float impact = Mathf.Sin(2f * Mathf.PI * 65f * ((float)i / sampleRate)) * env * 0.85f;
-            float dirt = Random.Range(-0.4f, 0.4f) * env * 0.45f;
-            samples[i] = impact + dirt;
+            float dirt = lp * env * 0.48f;
+            samples[i] = Mathf.Clamp(impact + dirt, -1f, 1f);
         }
 
         AudioClip clip = AudioClip.Create("DropLog_Procedural", sampleCount, 1, sampleRate, false);
@@ -267,17 +291,23 @@ public class LogCarryingSystem : MonoBehaviour
 
     private AudioClip GenerateThrowLogSound()
     {
-        int sampleRate = 44100;
+        int sampleRate = 22050;
         float duration = 0.30f;
         int sampleCount = (int)(sampleRate * duration);
         float[] samples = new float[sampleCount];
+        uint seed = 61037u;
+        float lp1 = 0f, lp2 = 0f;
 
         for (int i = 0; i < sampleCount; i++)
         {
             float t = (float)i / sampleCount;
-            float whoosh = Mathf.Sin(t * Mathf.PI) * Random.Range(-0.6f, 0.6f) * 0.65f;
+            seed = seed * 1664525u + 1013904223u;
+            float w = ((seed >> 16) / 65535f) * 2f - 1f;
+            lp1 = Mathf.Lerp(lp1, w, 0.18f);
+            lp2 = Mathf.Lerp(lp2, lp1, 0.05f);
+            float whoosh = Mathf.Sin(t * Mathf.PI) * (lp1 - lp2) * 0.72f;
             float grunt = Mathf.Sin(2f * Mathf.PI * 130f * ((float)i / sampleRate)) * Mathf.Exp(-15f * t) * 0.45f;
-            samples[i] = whoosh + grunt;
+            samples[i] = Mathf.Clamp(whoosh + grunt, -1f, 1f);
         }
 
         AudioClip clip = AudioClip.Create("ThrowLog_Procedural", sampleCount, 1, sampleRate, false);

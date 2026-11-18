@@ -8,6 +8,7 @@ public class ResourcePickup : MonoBehaviour
     public bool launchOnStart = true;
     public bool rotateInPlace = true;
     public float magnetRadius = 3.0f;
+    public bool disableAutoMagnet = false;
     public bool markMapHarvestedOnPickup = false;
     public Vector2Int mapGridKey;
 
@@ -63,7 +64,7 @@ public class ResourcePickup : MonoBehaviour
         bool launch = false,
         bool rotate = false,
         float lifetime = 0f,
-        float magnet = 1.35f)
+        float magnet = 0f)
     {
         itemID = newItemId;
         amount = Mathf.Max(1, newAmount);
@@ -73,6 +74,7 @@ public class ResourcePickup : MonoBehaviour
         rotateInPlace = rotate;
         maxLifetime = lifetime;
         magnetRadius = magnet;
+        disableAutoMagnet = magnet <= 0.01f;
         spawnTime = Time.time;
         harvestNotified = false;
         nextFullWarnTime = 0f;
@@ -95,6 +97,42 @@ public class ResourcePickup : MonoBehaviour
     public void CompleteManualCollect()
     {
         NotifyCollected();
+        if (HUDSurvivalOverlay.Instance != null)
+            HUDSurvivalOverlay.Instance.TriggerHitMarker(isCrit: false, isKill: false);
+        if (FirstPersonViewmodelController.Instance != null)
+            FirstPersonViewmodelController.Instance.TriggerVerticalImpulse(-0.022f);
+
+        if (Application.isPlaying && gameObject.activeInHierarchy && onRecycle == null)
+        {
+            Collider[] cols = GetComponentsInChildren<Collider>(true);
+            for (int i = 0; i < cols.Length; i++)
+                if (cols[i] != null) cols[i].enabled = false;
+            StartCoroutine(PlayManualCollectSnapAndConsume());
+            return;
+        }
+
+        ConsumeOrDestroy();
+    }
+
+    private System.Collections.IEnumerator PlayManualCollectSnapAndConsume()
+    {
+        if (rbCache != null) rbCache.isKinematic = true;
+        Vector3 startPos = transform.position;
+        Vector3 startScale = transform.localScale;
+        float elapsed = 0f;
+        const float dur = 0.10f;
+        Transform targetRef = playerTransformCache != null
+            ? playerTransformCache
+            : (PlayerController.Instance != null ? PlayerController.Instance.transform : (Camera.main != null ? Camera.main.transform : null));
+        while (elapsed < dur)
+        {
+            elapsed += Time.deltaTime;
+            float t = Mathf.Clamp01(elapsed / dur);
+            Vector3 dest = targetRef != null ? (targetRef.position + Vector3.up * 0.85f) : (startPos + Vector3.up * 0.4f);
+            transform.position = Vector3.Lerp(startPos, dest, t * t);
+            transform.localScale = Vector3.Lerp(startScale, startScale * 0.25f, t);
+            yield return null;
+        }
         ConsumeOrDestroy();
     }
 
@@ -136,6 +174,8 @@ public class ResourcePickup : MonoBehaviour
             playerTransformCache = PlayerController.Instance.transform;
         if (playerTransformCache == null) return;
 
+        if (disableAutoMagnet || magnetRadius <= 0.01f) return;
+
         Vector3 targetPos = playerTransformCache.position + Vector3.up * 0.55f;
         float distSq = (transform.position - targetPos).sqrMagnitude;
         float magnetSq = magnetRadius * magnetRadius;
@@ -158,7 +198,8 @@ public class ResourcePickup : MonoBehaviour
             if (collected > 0)
             {
                 ItemData d = ItemDatabase.GetItem(itemID);
-                string msg = $"+{collected} {(d != null ? d.itemName : "Item")}";
+                int totalNow = inventoryCache.GetItemCount(itemID);
+                string msg = $"+{collected} {(d != null ? d.itemName : "Item")} (Total: {totalNow})";
                 if (HUDSurvivalOverlay.Instance != null) HUDSurvivalOverlay.Instance.ShowLootTooltip(msg);
                 else if (uiCache != null) uiCache.SetLootTooltip(msg);
 

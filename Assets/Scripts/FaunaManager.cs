@@ -78,12 +78,14 @@ public class FaunaManager : MonoBehaviour
     private float[] bearPosX, bearPosY;
     private float[] bearVelX, bearVelY;
     private float[] bearHP;
+    private float[] bearAttackCooldowns;
 
     // Javalis (Wild Boars)
     public int maxBoars = 9;
     private float[] boarPosX, boarPosY;
     private float[] boarHP;
     private float[] boarVelX, boarVelY;
+    private float[] boarAttackCooldowns;
 
     // Coelhos
     public int maxRabbits = 20;
@@ -94,6 +96,7 @@ public class FaunaManager : MonoBehaviour
     private TrapSystem trapSystemCache;
     private HapticManager hapticManagerCache;
     private PlayerStatus playerStatusCache;
+    private PlayerController playerControllerCache;
     private Material cachedCarcassMat;
 
     private void Awake()
@@ -102,7 +105,11 @@ public class FaunaManager : MonoBehaviour
 
         trapSystemCache = FindAnyObjectByType<TrapSystem>();
         hapticManagerCache = FindAnyObjectByType<HapticManager>();
-        if (playerTransform != null) playerStatusCache = playerTransform.GetComponent<PlayerStatus>();
+        if (playerTransform != null)
+        {
+            playerStatusCache = playerTransform.GetComponent<PlayerStatus>();
+            playerControllerCache = playerTransform.GetComponent<PlayerController>();
+        }
 
         if (deerPrefab == null) deerPrefab = Resources.Load<GameObject>("Prefabs/Deer_Prefab");
         if (wolfPrefab == null) wolfPrefab = Resources.Load<GameObject>("Prefabs/Wolf_Prefab");
@@ -155,6 +162,7 @@ public class FaunaManager : MonoBehaviour
         bearVelX = new float[maxBears];
         bearVelY = new float[maxBears];
         bearHP = new float[maxBears];
+        bearAttackCooldowns = new float[maxBears];
 
         boarInstances = new GameObject[maxBoars];
         boarAnims = new AnimalProceduralAnimator[maxBoars];
@@ -163,6 +171,7 @@ public class FaunaManager : MonoBehaviour
         boarHP = new float[maxBoars];
         boarVelX = new float[maxBoars];
         boarVelY = new float[maxBoars];
+        boarAttackCooldowns = new float[maxBoars];
 
         rabbitInstances = new GameObject[maxRabbits];
         rabbitAnims = new AnimalProceduralAnimator[maxRabbits];
@@ -312,6 +321,7 @@ public class FaunaManager : MonoBehaviour
     {
         if (playerTransform == null || resourceManager == null) return;
         if (playerStatusCache == null) playerStatusCache = playerTransform.GetComponent<PlayerStatus>();
+        if (playerControllerCache == null) playerControllerCache = playerTransform.GetComponent<PlayerController>() ?? PlayerController.Instance;
 
         float px = playerTransform.position.x;
         float pz = playerTransform.position.z;
@@ -411,6 +421,15 @@ public class FaunaManager : MonoBehaviour
 
                 if (distSq < attackRangeSq && wolfAttackCooldowns[i] <= 0f)
                 {
+                    Vector3 wolfPos = new Vector3(wolfPosX[i], TerrainMeshGenerator.GetTerrainHeight(wolfPosX[i], wolfPosY[i]), wolfPosY[i]);
+                    if (playerControllerCache != null && playerControllerCache.IsInvulnerable)
+                    {
+                        if (HUDSurvivalOverlay.Instance != null)
+                            HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#55FFDD>ESQUIVA PERFEITA!</color>");
+                        wolfAttackCooldowns[i] = 1.8f;
+                        continue;
+                    }
+
                     if (playerSanity != null)
                     {
                         playerSanity.sanity -= wolfDamage;
@@ -418,9 +437,24 @@ public class FaunaManager : MonoBehaviour
                     }
                     if (playerStatusCache != null)
                     {
+                        float hpBefore = playerStatusCache.health;
                         playerStatusCache.TakeDamage(wolfDamage * 1.4f);
+                        if (playerStatusCache.health < hpBefore - 1f && Random.value < 0.30f)
+                        {
+                            playerStatusCache.ApplyBleeding();
+                        }
                     }
-                    wolfAttackCooldowns[i] = 3.5f;
+                    if (playerControllerCache != null)
+                    {
+                        Vector3 kb = (playerTransform.position - wolfPos);
+                        kb.y = 0f;
+                        if (kb.sqrMagnitude > 0.01f) playerControllerCache.ApplyKnockback(kb.normalized * 5.2f);
+                    }
+                    if (HUDSurvivalOverlay.Instance != null)
+                    {
+                        HUDSurvivalOverlay.Instance.ShowDamageFromDirection(wolfPos);
+                    }
+                    wolfAttackCooldowns[i] = 3.2f;
                 }
             }
         }
@@ -432,6 +466,8 @@ public class FaunaManager : MonoBehaviour
         for (int i = 0; i < maxBears; i++)
         {
             if (bearHP[i] <= 0) continue;
+            if (bearAttackCooldowns != null && bearAttackCooldowns[i] > 0f)
+                bearAttackCooldowns[i] -= dt;
 
             float dx = px - bearPosX[i];
             float dz = pz - bearPosY[i];
@@ -448,10 +484,38 @@ public class FaunaManager : MonoBehaviour
                     bearPosY[i] += bearVelY[i] * dt;
                 }
 
-                if (dist < 2.0f && playerStatusCache != null)
+                if (dist < 2.25f && (bearAttackCooldowns == null || bearAttackCooldowns[i] <= 0f))
                 {
-                    playerStatusCache.TakeDamagePassive(10f * dt);
-                    if (hapticManagerCache != null && Time.frameCount % 30 == 0) hapticManagerCache.TriggerHeavyVibration();
+                    Vector3 bearPos = new Vector3(bearPosX[i], TerrainMeshGenerator.GetTerrainHeight(bearPosX[i], bearPosY[i]), bearPosY[i]);
+                    if (playerControllerCache != null && playerControllerCache.IsInvulnerable)
+                    {
+                        if (HUDSurvivalOverlay.Instance != null)
+                            HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#55FFDD>ESQUIVA PERFEITA!</color>");
+                        if (bearAttackCooldowns != null) bearAttackCooldowns[i] = 1.6f;
+                        continue;
+                    }
+
+                    if (playerStatusCache != null)
+                    {
+                        float hpBefore = playerStatusCache.health;
+                        playerStatusCache.TakeDamage(26f);
+                        if (playerStatusCache.health < hpBefore - 1f)
+                        {
+                            if (Random.value < 0.35f) playerStatusCache.ApplyFracture();
+                            if (Random.value < 0.25f) playerStatusCache.ApplyBleeding();
+                        }
+                    }
+                    if (playerControllerCache != null)
+                    {
+                        Vector3 kb = (playerTransform.position - bearPos);
+                        kb.y = 0f;
+                        if (kb.sqrMagnitude > 0.01f) playerControllerCache.ApplyKnockback(kb.normalized * 9.0f);
+                    }
+                    if (HUDSurvivalOverlay.Instance != null)
+                        HUDSurvivalOverlay.Instance.ShowDamageFromDirection(bearPos);
+                    if (hapticManagerCache != null) hapticManagerCache.TriggerHeavyVibration();
+                    if (ScreenShakeSystem.Instance != null) ScreenShakeSystem.Instance.ShakeMedium();
+                    if (bearAttackCooldowns != null) bearAttackCooldowns[i] = 2.4f;
                 }
             }
             else
@@ -473,18 +537,60 @@ public class FaunaManager : MonoBehaviour
         for (int i = 0; i < maxBoars; i++)
         {
             if (boarHP[i] <= 0) continue;
+            if (boarAttackCooldowns != null && boarAttackCooldowns[i] > 0f)
+                boarAttackCooldowns[i] -= dt;
 
             float dx = px - boarPosX[i];
             float dz = pz - boarPosY[i];
             float distSq = dx * dx + dz * dz;
 
-            if (distSq < 8f * 8f)
+            if (boarHP[i] < 28f && distSq < 12f * 12f)
             {
                 float dist = Mathf.Max(0.05f, Mathf.Sqrt(distSq));
                 boarVelX[i] = -(dx / dist) * 4.5f;
                 boarVelY[i] = -(dz / dist) * 4.5f;
                 boarPosX[i] += boarVelX[i] * dt;
                 boarPosY[i] += boarVelY[i] * dt;
+            }
+            else if (distSq < 9f * 9f)
+            {
+                float dist = Mathf.Max(0.05f, Mathf.Sqrt(distSq));
+                boarVelX[i] = (dx / dist) * 5.1f;
+                boarVelY[i] = (dz / dist) * 5.1f;
+                boarPosX[i] += boarVelX[i] * dt;
+                boarPosY[i] += boarVelY[i] * dt;
+
+                if (dist < 1.85f && (boarAttackCooldowns == null || boarAttackCooldowns[i] <= 0f))
+                {
+                    Vector3 boarPos = new Vector3(boarPosX[i], TerrainMeshGenerator.GetTerrainHeight(boarPosX[i], boarPosY[i]), boarPosY[i]);
+                    if (playerControllerCache != null && playerControllerCache.IsInvulnerable)
+                    {
+                        if (HUDSurvivalOverlay.Instance != null)
+                            HUDSurvivalOverlay.Instance.ShowLootTooltip("<color=#55FFDD>ESQUIVA PERFEITA!</color>");
+                        if (boarAttackCooldowns != null) boarAttackCooldowns[i] = 1.5f;
+                        continue;
+                    }
+
+                    if (playerStatusCache != null)
+                    {
+                        float hpBefore = playerStatusCache.health;
+                        playerStatusCache.TakeDamage(14f);
+                        if (playerStatusCache.health < hpBefore - 1f && Random.value < 0.22f)
+                        {
+                            playerStatusCache.ApplyFracture();
+                        }
+                    }
+                    if (playerControllerCache != null)
+                    {
+                        Vector3 kb = (playerTransform.position - boarPos);
+                        kb.y = 0f;
+                        if (kb.sqrMagnitude > 0.01f) playerControllerCache.ApplyKnockback(kb.normalized * 6.2f);
+                    }
+                    if (HUDSurvivalOverlay.Instance != null)
+                        HUDSurvivalOverlay.Instance.ShowDamageFromDirection(boarPos);
+                    if (hapticManagerCache != null) hapticManagerCache.TriggerLightVibration();
+                    if (boarAttackCooldowns != null) boarAttackCooldowns[i] = 2.6f;
+                }
             }
             else
             {

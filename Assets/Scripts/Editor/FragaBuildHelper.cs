@@ -70,6 +70,9 @@ public static class FragaBuildHelper
     [MenuItem("Fraga/Build/Build Android APK (Staging)")]
     public static void BuildAndroidApk()
     {
+        ConfigureNativePluginsForBuild();
+        EnsureSafeAndroidGraphicsSettings();
+
         string report = RunChecklist(fixMissingMainScene: true, out bool allOk);
         if (!allOk)
         {
@@ -79,9 +82,14 @@ public static class FragaBuildHelper
         string[] scenes = CollectEnabledScenePaths();
         if (scenes.Length == 0)
         {
-            EditorUtility.DisplayDialog("Build Android Cancelado", "Nenhuma cena habilitada no EditorBuildSettings.", "OK");
+            if (!Application.isBatchMode)
+                EditorUtility.DisplayDialog("Build Android Cancelado", "Nenhuma cena habilitada no EditorBuildSettings.", "OK");
             return;
         }
+
+        EditorUserBuildSettings.buildAppBundle = false;
+        PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
+        PlayerSettings.SetScriptingBackend(UnityEditor.Build.NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
 
         string outDir = "Builds/Android";
         Directory.CreateDirectory(outDir);
@@ -98,11 +106,78 @@ public static class FragaBuildHelper
         BuildReport res = BuildPipeline.BuildPlayer(opts);
         if (res.summary.result == BuildResult.Succeeded)
         {
-            Debug.Log($"[FragaBuildHelper] Build Android APK concluido com sucesso em {outPath} ({res.summary.totalSize / (1024 * 1024)} MB).");
+            string fullOutPath = Path.GetFullPath(outPath);
+            Debug.Log($"[FragaBuildHelper] Build Android APK concluido com sucesso em {fullOutPath} ({res.summary.totalSize / (1024 * 1024)} MB).");
+            if (!Application.isBatchMode)
+            {
+                EditorUtility.RevealInFinder(fullOutPath);
+                EditorUtility.DisplayDialog("Build Android APK Concluido", $"APK gerado com sucesso em:\n{fullOutPath}", "OK");
+            }
         }
         else
         {
             Debug.LogError($"[FragaBuildHelper] Falha no Build Android: {res.summary.result} ({res.summary.totalErrors} erros).");
+            if (!Application.isBatchMode)
+            {
+                EditorUtility.DisplayDialog("Falha no Build Android", $"Resultado: {res.summary.result}\nErros: {res.summary.totalErrors}\nVeja o Console da Unity para detalhes.", "OK");
+            }
+        }
+    }
+
+    private static void EnsureSafeAndroidGraphicsSettings()
+    {
+        // Mali/Android 11 Vulkan + PreTransform + URP RenderGraph pode gerar tela preta com faixas de 8px.
+        // Forcar OpenGLES3 garante renderizacao completa em dispositivos mobile.
+        PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.Android, false);
+        GraphicsDeviceType[] currentApis = PlayerSettings.GetGraphicsAPIs(BuildTarget.Android);
+        if (currentApis == null || currentApis.Length != 1 || currentApis[0] != GraphicsDeviceType.OpenGLES3)
+        {
+            PlayerSettings.SetGraphicsAPIs(BuildTarget.Android, new[] { GraphicsDeviceType.OpenGLES3 });
+        }
+    }
+
+    private static void ConfigureNativePluginsForBuild()
+    {
+        if (AssetImporter.GetAtPath(AndroidPluginPath) is PluginImporter androidSo)
+        {
+            bool dirty = false;
+            if (androidSo.GetCompatibleWithAnyPlatform())
+            {
+                androidSo.SetCompatibleWithAnyPlatform(false);
+                dirty = true;
+            }
+            if (!androidSo.GetCompatibleWithPlatform(BuildTarget.Android))
+            {
+                androidSo.SetCompatibleWithPlatform(BuildTarget.Android, true);
+                dirty = true;
+            }
+            if (androidSo.GetPlatformData(BuildTarget.Android, "CPU") != "ARM64")
+            {
+                androidSo.SetPlatformData(BuildTarget.Android, "CPU", "ARM64");
+                dirty = true;
+            }
+            if (dirty) androidSo.SaveAndReimport();
+        }
+
+        if (AssetImporter.GetAtPath(WinPluginPath) is PluginImporter winDll)
+        {
+            bool dirty = false;
+            if (winDll.GetCompatibleWithAnyPlatform())
+            {
+                winDll.SetCompatibleWithAnyPlatform(false);
+                dirty = true;
+            }
+            if (!winDll.GetCompatibleWithPlatform(BuildTarget.StandaloneWindows64))
+            {
+                winDll.SetCompatibleWithPlatform(BuildTarget.StandaloneWindows64, true);
+                dirty = true;
+            }
+            if (winDll.GetCompatibleWithPlatform(BuildTarget.Android))
+            {
+                winDll.SetCompatibleWithPlatform(BuildTarget.Android, false);
+                dirty = true;
+            }
+            if (dirty) winDll.SaveAndReimport();
         }
     }
 
@@ -127,6 +202,19 @@ public static class FragaBuildHelper
         bool hasUrp = GraphicsSettings.currentRenderPipeline is UniversalRenderPipelineAsset;
         lines.Add(hasUrp ? "[OK] URP Asset ativo em GraphicsSettings" : "[AVISO] GraphicsSettings sem UniversalRenderPipelineAsset ativo");
         if (!hasUrp) ok = false;
+
+        GraphicsDeviceType[] androidApis = PlayerSettings.GetGraphicsAPIs(BuildTarget.Android);
+        bool hasVulkan = false;
+        if (androidApis != null)
+        {
+            foreach (GraphicsDeviceType api in androidApis)
+            {
+                if (api == GraphicsDeviceType.Vulkan) hasVulkan = true;
+            }
+        }
+        lines.Add(!hasVulkan
+            ? "[OK] Android Graphics API sem Vulkan (usando OpenGLES3)"
+            : "[AVISO] Android Graphics API contem Vulkan (pode causar tela preta em Mali/Android 11; recomendado OpenGLES3)");
 
         bool hasWinDll = File.Exists(WinPluginPath);
         bool hasAndroidSo = File.Exists(AndroidPluginPath);

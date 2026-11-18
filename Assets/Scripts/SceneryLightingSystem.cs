@@ -6,7 +6,7 @@ using System.Collections.Generic;
 /// - Cogumelos luminosos emanam brilho verde-azulado
 /// - Fogueiras e totens emanam luz cálida com tremulação orgânica
 /// - Cruzes celtas emanam aura lunar serena
-/// Ativa apenas luzes num raio de 48m do jogador para 60 FPS no Mobile e respeito ao limite de luzes da URP.
+/// Ativa apenas luzes próximas do jogador e limita a quantidade simultânea no Mobile para manter alto FPS na URP.
 /// </summary>
 public class SceneryLightingSystem : MonoBehaviour
 {
@@ -20,6 +20,7 @@ public class SceneryLightingSystem : MonoBehaviour
     public float campfireLightRange = 9f;
     public float crossLightRange = 6f;
     public float activeRadius = 48f;
+    public int maxActiveMobileLights = 3;
 
     private enum LightKind : byte { Mushroom, Campfire, Cross }
 
@@ -29,14 +30,26 @@ public class SceneryLightingSystem : MonoBehaviour
         public LightKind kind;
     }
 
+    private struct LightCandidate
+    {
+        public Light light;
+        public LightKind kind;
+        public float distSq;
+    }
+
     private readonly Dictionary<GameObject, TrackedLight> trackedLights = new Dictionary<GameObject, TrackedLight>();
     private readonly List<GameObject> deadKeys = new List<GameObject>(32);
+    private readonly List<LightCandidate> activeCandidates = new List<LightCandidate>(32);
     private float nextScanTime = 0f;
 
     private void Start()
     {
         if (mapRenderer == null) mapRenderer = FindAnyObjectByType<MapRenderer>();
         if (dayNightCycle == null) dayNightCycle = FindAnyObjectByType<DayNightCycle>();
+        if (Application.isMobilePlatform && activeRadius > 26f)
+        {
+            activeRadius = 26f;
+        }
         ResolvePlayer();
     }
 
@@ -64,7 +77,6 @@ public class SceneryLightingSystem : MonoBehaviour
 
     private void SyncWithStreamedInstances()
     {
-        // 1. Limpa referências de chunks descarregados / árvores cortadas
         deadKeys.Clear();
         foreach (var kvp in trackedLights)
         {
@@ -78,7 +90,6 @@ public class SceneryLightingSystem : MonoBehaviour
 
         if (mapRenderer == null || mapRenderer.activeInstances == null) return;
 
-        // 2. Anexa luzes em novos objetos carregados pelos chunks ativos
         foreach (var kvp in mapRenderer.activeInstances)
         {
             GameObject go = kvp.Value;
@@ -117,6 +128,7 @@ public class SceneryLightingSystem : MonoBehaviour
         light.intensity = intensity;
         light.shadows = LightShadows.None;
         light.renderMode = LightRenderMode.Auto;
+        light.enabled = false;
         return light;
     }
 
@@ -124,9 +136,14 @@ public class SceneryLightingSystem : MonoBehaviour
     {
         ResolvePlayer();
         Vector3 pPos = playerTransform != null ? playerTransform.position : Vector3.zero;
-        float radiusSq = activeRadius * activeRadius;
+        bool isMobile = Application.isMobilePlatform;
+        float effectiveRadius = isMobile ? Mathf.Min(activeRadius, 26f) : activeRadius;
+        float radiusSq = effectiveRadius * effectiveRadius;
+        int maxLights = isMobile ? Mathf.Max(1, maxActiveMobileLights) : int.MaxValue;
         float time = Time.time;
         bool isNight = dayNightCycle != null && (dayNightCycle.currentTime >= 19f || dayNightCycle.currentTime < 6f);
+
+        activeCandidates.Clear();
 
         foreach (var kvp in trackedLights)
         {
@@ -135,10 +152,49 @@ public class SceneryLightingSystem : MonoBehaviour
 
             float dSq = (l.transform.position - pPos).sqrMagnitude;
             bool inRange = (playerTransform == null) || dSq <= radiusSq;
-            if (l.enabled != inRange) l.enabled = inRange;
-            if (!inRange) continue;
+            if (!inRange)
+            {
+                if (l.enabled) l.enabled = false;
+                continue;
+            }
 
-            switch (kvp.Value.kind)
+            if (activeCandidates.Count < maxLights)
+            {
+                activeCandidates.Add(new LightCandidate { light = l, kind = kvp.Value.kind, distSq = dSq });
+            }
+            else
+            {
+                // Mantém apenas as N luzes mais próximas no Mobile
+                int farthestIdx = 0;
+                float farthestDist = activeCandidates[0].distSq;
+                for (int i = 1; i < activeCandidates.Count; i++)
+                {
+                    if (activeCandidates[i].distSq > farthestDist)
+                    {
+                        farthestDist = activeCandidates[i].distSq;
+                        farthestIdx = i;
+                    }
+                }
+                if (dSq < farthestDist)
+                {
+                    if (activeCandidates[farthestIdx].light.enabled)
+                        activeCandidates[farthestIdx].light.enabled = false;
+                    activeCandidates[farthestIdx] = new LightCandidate { light = l, kind = kvp.Value.kind, distSq = dSq };
+                }
+                else if (l.enabled)
+                {
+                    l.enabled = false;
+                }
+            }
+        }
+
+        for (int i = 0; i < activeCandidates.Count; i++)
+        {
+            LightCandidate c = activeCandidates[i];
+            Light l = c.light;
+            if (!l.enabled) l.enabled = true;
+
+            switch (c.kind)
             {
                 case LightKind.Mushroom:
                     l.intensity = 0.45f + Mathf.Sin(time * 1.6f) * 0.22f;

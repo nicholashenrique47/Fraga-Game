@@ -73,8 +73,23 @@ public class FarmingSystem : MonoBehaviour
         {
             if (inventory.HasItem(307))
             {
+                PlayerStatus status = PlayerStatus.Instance;
+                if (status != null)
+                {
+                    if (status.stamina < 4f)
+                    {
+                        if (HUDSurvivalOverlay.Instance != null)
+                            HUDSurvivalOverlay.Instance.ShowLootTooltip("Sem folego para lavrar terra!");
+                        return false;
+                    }
+                    status.stamina = Mathf.Max(0f, status.stamina - 6f);
+                }
+
                 gameManager.UpdateMapCellNative(pX, pY, 14);
-                if (mapRenderer != null) mapRenderer.AddInstanceAt(pX, pY, 14);
+                if (inventory.equippedMainHandId == 307)
+                {
+                    inventory.DamageEquippedTool(EquipSlotType.MainHand, 1f);
+                }
 
                 float gy = TerrainMeshGenerator.GetTerrainHeight(pX, pY);
                 if (VFXPoolManager.Instance != null) VFXPoolManager.Instance.PlayBuildPlaceVFX(new Vector3(pX, gy + 0.1f, pY));
@@ -88,8 +103,10 @@ public class FarmingSystem : MonoBehaviour
             {
                 inventory.RemoveItem(112, 1);
 
-                float currentHour = dayNightCycle != null ? dayNightCycle.currentTime : 8f;
-                FarmPlot plot = new FarmPlot { x = pX, y = pY, plantTime = currentHour, isGrown = false };
+                float totalHours = dayNightCycle != null
+                    ? (dayNightCycle.currentDay * 24f + dayNightCycle.currentTime)
+                    : (Time.time / 30f);
+                FarmPlot plot = new FarmPlot { x = pX, y = pY, plantTime = totalHours, isGrown = false };
                 activePlots.Add(plot);
 
                 float gy = TerrainMeshGenerator.GetTerrainHeight(pX, pY);
@@ -110,23 +127,21 @@ public class FarmingSystem : MonoBehaviour
     {
         if (dayNightCycle == null || gameManager == null || gameManager.mapDataPtr == System.IntPtr.Zero) return;
 
+        float nowHours = dayNightCycle.currentDay * 24f + dayNightCycle.currentTime;
+
         for (int i = activePlots.Count - 1; i >= 0; i--)
         {
             FarmPlot p = activePlots[i];
             if (!p.isGrown)
             {
-                float timePassed = dayNightCycle.currentTime - p.plantTime;
-                if (timePassed < 0f) timePassed += 24f;
+                float timePassed = nowHours - p.plantTime;
 
-                if (timePassed > 12f)
+                if (timePassed >= 4.5f)
                 {
                     p.isGrown = true;
                     gameManager.UpdateMapCellNative(p.x, p.y, 9);
-                    if (mapRenderer != null)
-                    {
-                        mapRenderer.RemoveInstanceAt(p.x, p.y, 14);
-                        mapRenderer.AddInstanceAt(p.x, p.y, 9);
-                    }
+                    if (HUDSurvivalOverlay.Instance != null)
+                        HUDSurvivalOverlay.Instance.ShowLootTooltip("Lavoura madura! Bagas prontas para colher.");
                     activePlots.RemoveAt(i);
                 }
             }

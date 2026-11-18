@@ -46,7 +46,7 @@ public class RadialQuickSelectUI : MonoBehaviour
 
     private void BuildRadialUI()
     {
-        Canvas canvas = GetComponentInParent<Canvas>() ?? FindAnyObjectByType<Canvas>();
+        Canvas canvas = HUDSurvivalOverlay.GetGameplayCanvas();
         if (canvas == null) return;
 
         radialContainer = new GameObject("RadialQuickSelect_Root");

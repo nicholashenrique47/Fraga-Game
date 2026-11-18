@@ -27,8 +27,8 @@ public class GalicianAtmosphericLightingDriver : MonoBehaviour
     public float dayIntensity = 1.6f;
 
     [Header("Cascatas de Sombra URP (Mobile / PC)")]
-    public float maxShadowDistance = 55.0f;
-    public int shadowCascadeCount = 2;
+    public float maxShadowDistance = 45.0f;
+    public int shadowCascadeCount = 1;
     public float pcMaxShadowDistance = 115.0f;
     public int pcShadowCascadeCount = 4;
 
@@ -133,8 +133,8 @@ public class GalicianAtmosphericLightingDriver : MonoBehaviour
         RenderSettings.ambientMode = AmbientMode.Trilight;
         RenderSettings.fog = true;
         RenderSettings.fogMode = FogMode.Linear;
-        RenderSettings.fogStartDistance = Application.isMobilePlatform ? 65f : 90f;
-        RenderSettings.fogEndDistance = Application.isMobilePlatform ? 390f : 580f;
+        RenderSettings.fogStartDistance = Application.isMobilePlatform ? 55f : 90f;
+        RenderSettings.fogEndDistance = Application.isMobilePlatform ? 280f : 580f;
 
         if (isNightTime)
         {

@@ -33,9 +33,23 @@ public class AtmosphericEffectsSystem : MonoBehaviour
     private bool isDawn;
     private float currentTime;
     private Texture2D softGlowFallback;
+    private PlayerStatus cachedPlayerStatus;
 
     private void Start()
     {
+        if (Application.isMobilePlatform)
+        {
+            maxDustMotes = Mathf.Min(maxDustMotes, 50);
+            maxFireflies = Mathf.Min(maxFireflies, 35);
+            maxFogParticles = Mathf.Min(maxFogParticles, 60);
+            maxLeaves = Mathf.Min(maxLeaves, 25);
+        }
+
+        if (playerTransform != null)
+        {
+            cachedPlayerStatus = playerTransform.GetComponent<PlayerStatus>();
+        }
+
         CreateDustMotes();
         CreateFireflies();
         CreateGroundFog();
@@ -59,23 +73,21 @@ public class AtmosphericEffectsSystem : MonoBehaviour
         main.startColor = new Color(1f, 0.95f, 0.8f, 0.35f);
         main.maxParticles = maxDustMotes;
         main.simulationSpace = ParticleSystemSimulationSpace.World;
-        main.gravityModifier = -0.01f; // Levemente flutuante para cima
+        main.gravityModifier = -0.01f;
 
         var emission = dustParticles.emission;
-        emission.rateOverTime = 30f;
+        emission.rateOverTime = Application.isMobilePlatform ? 10f : 30f;
 
         var shape = dustParticles.shape;
         shape.shapeType = ParticleSystemShapeType.Box;
         shape.scale = new Vector3(20f, 8f, 20f);
 
-        // Movimento errático (turbulência)
         var noise = dustParticles.noise;
         noise.enabled = true;
         noise.strength = 0.3f;
         noise.frequency = 0.5f;
         noise.scrollSpeed = 0.2f;
 
-        // Fade in/out
         var colorOverLifetime = dustParticles.colorOverLifetime;
         colorOverLifetime.enabled = true;
         Gradient g = new Gradient();
@@ -107,25 +119,23 @@ public class AtmosphericEffectsSystem : MonoBehaviour
         main.startLifetime = new ParticleSystem.MinMaxCurve(4f, 8f);
         main.startSpeed = new ParticleSystem.MinMaxCurve(0.1f, 0.4f);
         main.startSize = new ParticleSystem.MinMaxCurve(0.06f, 0.14f);
-        main.startColor = new Color(0.8f, 1f, 0.3f, 0.85f); // Verde-amarelo bioluminescente
+        main.startColor = new Color(0.8f, 1f, 0.3f, 0.85f);
         main.maxParticles = maxFireflies;
         main.simulationSpace = ParticleSystemSimulationSpace.World;
 
         var emission = fireflyParticles.emission;
-        emission.rateOverTime = 10f;
+        emission.rateOverTime = Application.isMobilePlatform ? 5f : 10f;
 
         var shape = fireflyParticles.shape;
         shape.shapeType = ParticleSystemShapeType.Box;
         shape.scale = new Vector3(25f, 3f, 25f);
 
-        // Movimento errático mais agressivo (vaga-lumes ziguezagueiam)
         var noise = fireflyParticles.noise;
         noise.enabled = true;
         noise.strength = 1.0f;
         noise.frequency = 2f;
         noise.scrollSpeed = 0.5f;
 
-        // Piscar (alpha oscilante)
         var colorOverLifetime = fireflyParticles.colorOverLifetime;
         colorOverLifetime.enabled = true;
         Gradient g = new Gradient();
@@ -162,25 +172,26 @@ public class AtmosphericEffectsSystem : MonoBehaviour
         main.loop = true;
         main.startLifetime = new ParticleSystem.MinMaxCurve(8f, 15f);
         main.startSpeed = new ParticleSystem.MinMaxCurve(0.05f, 0.2f);
-        main.startSize = new ParticleSystem.MinMaxCurve(2.5f, 5.5f);
-        main.startColor = new Color(0.7f, 0.75f, 0.8f, 0.12f); // Névoa macia
+        main.startSize = Application.isMobilePlatform
+            ? new ParticleSystem.MinMaxCurve(1.6f, 3.0f)
+            : new ParticleSystem.MinMaxCurve(2.5f, 5.5f);
+        main.startColor = new Color(0.7f, 0.75f, 0.8f, 0.12f);
         main.maxParticles = maxFogParticles;
         main.simulationSpace = ParticleSystemSimulationSpace.World;
-        main.gravityModifier = -0.005f; // Sobe lentamente
+        main.gravityModifier = -0.005f;
 
         var emission = groundFogParticles.emission;
-        emission.rateOverTime = 20f;
+        emission.rateOverTime = Application.isMobilePlatform ? 5f : 20f;
 
         var shape = groundFogParticles.shape;
         shape.shapeType = ParticleSystemShapeType.Box;
-        shape.scale = new Vector3(40f, 0.5f, 40f); // Rente ao chão
+        shape.scale = new Vector3(40f, 0.5f, 40f);
 
         var noise = groundFogParticles.noise;
         noise.enabled = true;
         noise.strength = 0.15f;
         noise.frequency = 0.2f;
 
-        // Fade
         var colorOverLifetime = groundFogParticles.colorOverLifetime;
         colorOverLifetime.enabled = true;
         Gradient g = new Gradient();
@@ -213,22 +224,21 @@ public class AtmosphericEffectsSystem : MonoBehaviour
         main.startSpeed = new ParticleSystem.MinMaxCurve(0.3f, 1f);
         main.startSize = new ParticleSystem.MinMaxCurve(0.09f, 0.16f);
         main.startColor = new ParticleSystem.MinMaxGradient(
-            new Color(0.4f, 0.25f, 0.1f, 0.85f),   // Folha seca castanha
-            new Color(0.15f, 0.25f, 0.05f, 0.85f)   // Folha verde escura
+            new Color(0.4f, 0.25f, 0.1f, 0.85f),
+            new Color(0.15f, 0.25f, 0.05f, 0.85f)
         );
         main.maxParticles = maxLeaves;
         main.simulationSpace = ParticleSystemSimulationSpace.World;
-        main.gravityModifier = 0.08f; // Cai lentamente
+        main.gravityModifier = 0.08f;
         main.startRotation3D = true;
 
         var emission = leavesParticles.emission;
-        emission.rateOverTime = 5f;
+        emission.rateOverTime = Application.isMobilePlatform ? 2.5f : 5f;
 
         var shape = leavesParticles.shape;
         shape.shapeType = ParticleSystemShapeType.Box;
         shape.scale = new Vector3(30f, 10f, 30f);
 
-        // Rotação ao cair
         var rotOverLifetime = leavesParticles.rotationOverLifetime;
         rotOverLifetime.enabled = true;
         rotOverLifetime.z = new ParticleSystem.MinMaxCurve(-2f, 2f);
@@ -256,15 +266,15 @@ public class AtmosphericEffectsSystem : MonoBehaviour
         main.startSpeed = new ParticleSystem.MinMaxCurve(0.5f, 2f);
         main.startSize = new ParticleSystem.MinMaxCurve(0.03f, 0.07f);
         main.startColor = new ParticleSystem.MinMaxGradient(
-            new Color(1f, 0.3f, 0f, 0.9f),    // Laranja
-            new Color(1f, 0.7f, 0.1f, 0.9f)    // Amarelo
+            new Color(1f, 0.3f, 0f, 0.9f),
+            new Color(1f, 0.7f, 0.1f, 0.9f)
         );
-        main.maxParticles = 60;
+        main.maxParticles = Application.isMobilePlatform ? 25 : 60;
         main.simulationSpace = ParticleSystemSimulationSpace.World;
-        main.gravityModifier = -0.15f; // Sobem
+        main.gravityModifier = -0.15f;
 
         var emission = embersParticles.emission;
-        emission.rateOverTime = 15f;
+        emission.rateOverTime = Application.isMobilePlatform ? 8f : 15f;
 
         var shape = embersParticles.shape;
         shape.shapeType = ParticleSystemShapeType.Sphere;
@@ -275,7 +285,6 @@ public class AtmosphericEffectsSystem : MonoBehaviour
         noise.strength = 0.4f;
         noise.frequency = 1.5f;
 
-        // Fade out
         var colorOverLifetime = embersParticles.colorOverLifetime;
         colorOverLifetime.enabled = true;
         Gradient g = new Gradient();
@@ -332,20 +341,28 @@ public class AtmosphericEffectsSystem : MonoBehaviour
     private void SetupParticleRenderer(ParticleSystem ps, Color tint, bool isMist = false, bool additive = false)
     {
         var renderer = ps.GetComponent<ParticleSystemRenderer>();
-        Material mat = new Material(Shader.Find("Universal Render Pipeline/Particles/Unlit"));
-        if (mat.shader == null) mat = new Material(Shader.Find("Particles/Standard Unlit"));
+        Shader shader = Shader.Find("Universal Render Pipeline/Particles/Unlit")
+            ?? Shader.Find("Particles/Standard Unlit")
+            ?? Shader.Find("Universal Render Pipeline/Unlit")
+            ?? Shader.Find("Sprites/Default");
+        if (shader == null)
+        {
+            renderer.renderMode = ParticleSystemRenderMode.Billboard;
+            return;
+        }
+
+        Material mat = new Material(shader);
 
         Texture2D tex = GetParticleTexture(isMist);
-        mat.SetTexture("_BaseMap", tex);
+        if (mat.HasProperty("_BaseMap")) mat.SetTexture("_BaseMap", tex);
         mat.mainTexture = tex;
-        mat.SetColor("_BaseColor", tint);
+        if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", tint);
         mat.color = tint;
 
-        // Ativar transparência suave sem z-fight ou quadrados
-        mat.SetFloat("_Surface", 1);
-        mat.SetInt("_ZWrite", 0);
-        mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-        mat.SetInt("_DstBlend", (int)(additive
+        if (mat.HasProperty("_Surface")) mat.SetFloat("_Surface", 1);
+        if (mat.HasProperty("_ZWrite")) mat.SetInt("_ZWrite", 0);
+        if (mat.HasProperty("_SrcBlend")) mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+        if (mat.HasProperty("_DstBlend")) mat.SetInt("_DstBlend", (int)(additive
             ? UnityEngine.Rendering.BlendMode.One
             : UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha));
         mat.renderQueue = 3000;
@@ -363,7 +380,6 @@ public class AtmosphericEffectsSystem : MonoBehaviour
         isNight = currentTime >= 19f || currentTime < 6f;
         isDawn = currentTime >= 3f && currentTime < 7f;
 
-        // Posicionar partículas ao redor do jogador
         if (playerTransform != null)
         {
             Vector3 playerPos = playerTransform.position;
@@ -374,12 +390,10 @@ public class AtmosphericEffectsSystem : MonoBehaviour
             if (leavesParticles != null) leavesParticles.transform.position = playerPos + Vector3.up * 5f;
         }
 
-        // Controlar ativação por período do dia
-        ManageParticleState(dustParticles, !isNight && !isDawn);  // Poeira durante o dia
-        ManageParticleState(fireflyParticles, isNight);            // Vaga-lumes à noite
-        ManageParticleState(groundFogParticles, isDawn);           // Névoa na madrugada
+        ManageParticleState(dustParticles, !isNight && !isDawn);
+        ManageParticleState(fireflyParticles, isNight);
+        ManageParticleState(groundFogParticles, isDawn);
 
-        // Ajustar velocidade das folhas com o vento
         if (leavesParticles != null && weatherSystem != null)
         {
             var velocityOverLifetime = leavesParticles.velocityOverLifetime;
@@ -390,7 +404,6 @@ public class AtmosphericEffectsSystem : MonoBehaviour
             velocityOverLifetime.z = new ParticleSystem.MinMaxCurve(-0.3f, 0.3f);
         }
 
-        // Brasas: Ativar perto de fogueiras
         UpdateEmbers();
     }
 
@@ -398,12 +411,12 @@ public class AtmosphericEffectsSystem : MonoBehaviour
     {
         if (embersParticles == null || playerTransform == null) return;
 
-        // Verifica se o jogador está perto de uma fogueira
-        PlayerStatus ps = playerTransform.GetComponent<PlayerStatus>();
-        if (ps != null && ps.isNearBonfire)
+        if (cachedPlayerStatus == null)
+            cachedPlayerStatus = playerTransform.GetComponent<PlayerStatus>();
+
+        if (cachedPlayerStatus != null && cachedPlayerStatus.isNearBonfire)
         {
             if (!embersParticles.isPlaying) embersParticles.Play();
-            // Posicionar brasas na fogueira mais próxima (estimativa via posição do jogador)
             embersParticles.transform.position = playerTransform.position + playerTransform.forward * 1.5f;
         }
         else

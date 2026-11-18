@@ -144,14 +144,17 @@
                 float NdotL = saturate(dot(normalWS, lightDir));
                 float atten = light.distanceAttenuation * lerp(shadowFloor, 1.0, light.shadowAttenuation);
 
+                float SSS_dot = saturate(dot(viewDir, -lightDir));
+            #if defined(SHADER_API_MOBILE)
+                float spec = 0.0;
+                float SSS = (SSS_dot * SSS_dot) * 1.45 * (0.55 + 0.45 * aoFactor);
+            #else
                 float3 halfDir = normalize(lightDir + viewDir);
                 float NdotH = saturate(dot(normalWS, halfDir));
                 float specPower = exp2(7.0 * leafSmoothness + 1.0);
-                float spec = pow(NdotH, specPower) * leafSmoothness * (0.10 + wetness * 0.35);
-
-                // Subsurface Scattering (backlighting through leaves)
-                float SSS_dot = saturate(dot(viewDir, -lightDir));
-                float SSS = pow(SSS_dot, _TranslucencyPower) * 1.45 * (0.55 + 0.45 * aoFactor);
+                float spec = pow(max(NdotH, 1e-4), specPower) * leafSmoothness * (0.10 + wetness * 0.35);
+                float SSS = pow(max(SSS_dot, 1e-4), _TranslucencyPower) * 1.45 * (0.55 + 0.45 * aoFactor);
+            #endif
                 half3 SSS_contrib = SSS * _TranslucencyColor.rgb * albedo * 1.8;
 
                 return (albedo * NdotL + spec + SSS_contrib) * light.color * atten;
@@ -173,10 +176,14 @@
                 albedo.rgb *= aoFactor * tintShift;
 
                 float3 worldNormal = normalize(input.normalWS);
+            #if defined(SHADER_API_MOBILE)
+                float3 normalWS = worldNormal;
+            #else
                 half4 nMap = SAMPLE_TEXTURE2D(_BumpMap, sampler_BumpMap, input.uv);
                 half3 normalTS = UnpackNormalScale(nMap, _NormalScale);
                 float3 bitangent = cross(worldNormal, input.tangentWS.xyz) * input.tangentWS.w;
                 float3 normalWS = normalize(TransformTangentToWorld(normalTS, float3x3(input.tangentWS.xyz, bitangent, worldNormal)));
+            #endif
 
                 if (facing < 0) normalWS = -normalWS;
 

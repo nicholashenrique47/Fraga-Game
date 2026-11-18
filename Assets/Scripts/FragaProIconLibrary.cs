@@ -36,7 +36,16 @@ public static class FragaProIconLibrary
         RotateLeft,
         RotateRight,
         ConfirmCheck,
-        CancelCross
+        CancelCross,
+        HeartPulse,
+        HungerFork,
+        WaterDrop,
+        SanityEye,
+        Thermometer,
+        BookmarkPin,
+        UsersSquad,
+        SettingsGear,
+        PlayArrow
     }
 
     private static readonly Dictionary<ControlIcon, Sprite> s_controlCache = new Dictionary<ControlIcon, Sprite>();
@@ -44,6 +53,11 @@ public static class FragaProIconLibrary
     private static Sprite s_slotFrameSprite;
     private static Sprite s_circleBgSprite;
     private static Sprite s_pillBgSprite;
+    private static Sprite s_glassPanelSprite;
+    private static Sprite s_verticalGradSprite;
+    private static Sprite s_blueprintGridSprite;
+    private static Sprite s_anatomySprite;
+    private static Sprite s_barFillSprite;
 
     private const int ICON_SIZE = 96;
 
@@ -126,6 +140,136 @@ public static class FragaProIconLibrary
 
         s_pillBgSprite = BakeSprite("Pro_PillBG", w, h, px, new Vector4(20, 14, 20, 14));
         return s_pillBgSprite;
+    }
+
+    public static Sprite GetGlassPanelSprite()
+    {
+        if (s_glassPanelSprite != null) return s_glassPanelSprite;
+
+        int s = 96;
+        Color[] px = new Color[s * s];
+        Vector2 half = new Vector2(s * 0.5f, s * 0.5f);
+        Vector2 box = new Vector2(s * 0.46f, s * 0.46f);
+
+        for (int y = 0; y < s; y++)
+        {
+            float yNorm = y / (float)(s - 1);
+            for (int x = 0; x < s; x++)
+            {
+                Vector2 p = new Vector2(x + 0.5f, y + 0.5f) - half;
+                float d = SdRoundBox(p, box, 12f);
+                float fill = 1f - Smooth(-1.2f, 0.8f, d);
+                float border = Smooth(-2.8f, -1.2f, d) * (1f - Smooth(-0.4f, 0.9f, d));
+                float topSheen = Mathf.Lerp(0.76f, 0.96f, yNorm);
+                float col = Mathf.Clamp01(topSheen + border * 0.24f);
+                px[y * s + x] = new Color(col, col, col, fill);
+            }
+        }
+
+        s_glassPanelSprite = BakeSprite("Pro_GlassPanel", s, s, px, new Vector4(18, 18, 18, 18));
+        return s_glassPanelSprite;
+    }
+
+    public static Sprite GetVerticalGradientSprite()
+    {
+        if (s_verticalGradSprite != null) return s_verticalGradSprite;
+
+        int w = 4, h = 128;
+        Color[] px = new Color[w * h];
+        for (int y = 0; y < h; y++)
+        {
+            float t = y / (float)(h - 1);
+            float a = Mathf.SmoothStep(0f, 1f, t);
+            for (int x = 0; x < w; x++)
+            {
+                px[y * w + x] = new Color(1f, 1f, 1f, a);
+            }
+        }
+
+        s_verticalGradSprite = BakeSprite("Pro_VertGrad", w, h, px);
+        return s_verticalGradSprite;
+    }
+
+    public static Sprite GetBlueprintGridSprite()
+    {
+        if (s_blueprintGridSprite != null) return s_blueprintGridSprite;
+
+        int s = 64;
+        Color[] px = new Color[s * s];
+        for (int y = 0; y < s; y++)
+        {
+            for (int x = 0; x < s; x++)
+            {
+                bool major = (x == 0 || y == 0);
+                bool minor = (x % 16 == 0 || y % 16 == 0);
+                float a = major ? 0.24f : (minor ? 0.10f : 0.02f);
+                px[y * s + x] = new Color(1f, 1f, 1f, a);
+            }
+        }
+
+        s_blueprintGridSprite = BakeSprite("Pro_BlueprintGrid", s, s, px);
+        return s_blueprintGridSprite;
+    }
+
+    public static Sprite GetAnatomySilhouetteSprite()
+    {
+        if (s_anatomySprite != null) return s_anatomySprite;
+
+        int w = 128, h = 192;
+        Color[] px = new Color[w * h];
+        for (int y = 0; y < h; y++)
+        {
+            float py = ((y + 0.5f) / h) * 2f - 1f;
+            for (int x = 0; x < w; x++)
+            {
+                float pxn = (((x + 0.5f) / w) * 2f - 1f) * (w / (float)h);
+                Vector2 p = new Vector2(pxn, py);
+
+                float head = SdCircle(p - new Vector2(0f, 0.72f), 0.15f);
+                float neck = SdRoundBox(p - new Vector2(0f, 0.54f), new Vector2(0.065f, 0.08f), 0.02f);
+                float chest = SdRoundBox(p - new Vector2(0f, 0.24f), new Vector2(0.22f, 0.26f), 0.09f);
+                float waist = SdRoundBox(p - new Vector2(0f, -0.06f), new Vector2(0.17f, 0.14f), 0.06f);
+                float armL = SdSegment(p, new Vector2(-0.22f, 0.40f), new Vector2(-0.34f, -0.14f), 0.062f);
+                float armR = SdSegment(p, new Vector2(0.22f, 0.40f), new Vector2(0.34f, -0.14f), 0.062f);
+                float legL = SdSegment(p, new Vector2(-0.10f, -0.14f), new Vector2(-0.14f, -0.86f), 0.078f);
+                float legR = SdSegment(p, new Vector2(0.10f, -0.14f), new Vector2(0.14f, -0.86f), 0.078f);
+
+                float body = Mathf.Min(head, neck);
+                body = Mathf.Min(body, Mathf.Min(chest, waist));
+                body = Mathf.Min(body, Mathf.Min(armL, armR));
+                body = Mathf.Min(body, Mathf.Min(legL, legR));
+
+                float fill = 1f - Smooth(-0.018f, 0.018f, body);
+                float rim = Smooth(-0.045f, -0.015f, body) * (1f - Smooth(-0.005f, 0.018f, body));
+                float shade = Mathf.Lerp(0.72f, 1.0f, rim);
+                px[y * w + x] = new Color(shade, shade, shade, fill);
+            }
+        }
+
+        s_anatomySprite = BakeSprite("Pro_AnatomyBody", w, h, px);
+        return s_anatomySprite;
+    }
+
+    public static Sprite GetBarFillSprite()
+    {
+        if (s_barFillSprite != null) return s_barFillSprite;
+
+        int w = 32, h = 16;
+        Color[] px = new Color[w * h];
+        for (int y = 0; y < h; y++)
+        {
+            float yn = y / (float)(h - 1);
+            // Brilho sutil no topo da barra para visual AAA polido
+            float sheen = yn >= 0.62f ? Mathf.Lerp(0.92f, 1.0f, (yn - 0.62f) / 0.38f) : Mathf.Lerp(0.78f, 0.92f, yn / 0.62f);
+            float alphaEdge = (y == 0 || y == h - 1) ? 0.72f : 1f;
+            for (int x = 0; x < w; x++)
+            {
+                px[y * w + x] = new Color(sheen, sheen, sheen, alphaEdge);
+            }
+        }
+
+        s_barFillSprite = BakeSprite("Pro_BarFill", w, h, px);
+        return s_barFillSprite;
     }
 
     public static Sprite GetControlIcon(ControlIcon icon)
@@ -419,6 +563,99 @@ public static class FragaProIconLibrary
                         float s1 = SdSegment(p, new Vector2(-0.34f, -0.34f), new Vector2(0.34f, 0.34f), 0.08f);
                         float s2 = SdSegment(p, new Vector2(-0.34f, 0.34f), new Vector2(0.34f, -0.34f), 0.08f);
                         outCol = Blend(outCol, new Color(1.0f, 0.38f, 0.38f, 1f), Fill(Mathf.Min(s1, s2)));
+                        break;
+                    }
+                    case ControlIcon.HeartPulse:
+                    {
+                        float cL = SdCircle(p - new Vector2(-0.20f, 0.16f), 0.25f);
+                        float cR = SdCircle(p - new Vector2(0.20f, 0.16f), 0.25f);
+                        float bot = SdTriangle(Rot(p - new Vector2(0f, -0.12f), Mathf.PI), 0.44f, 0.48f);
+                        float heart = Mathf.Min(Mathf.Min(cL, cR), bot);
+                        float e1 = SdSegment(p, new Vector2(-0.34f, 0.0f), new Vector2(-0.14f, 0.0f), 0.032f);
+                        float e2 = SdSegment(p, new Vector2(-0.14f, 0.0f), new Vector2(-0.04f, 0.22f), 0.032f);
+                        float e3 = SdSegment(p, new Vector2(-0.04f, 0.22f), new Vector2(0.08f, -0.16f), 0.032f);
+                        float e4 = SdSegment(p, new Vector2(0.08f, -0.16f), new Vector2(0.18f, 0.0f), 0.032f);
+                        float e5 = SdSegment(p, new Vector2(0.18f, 0.0f), new Vector2(0.34f, 0.0f), 0.032f);
+                        float ecg = Mathf.Min(Mathf.Min(e1, e2), Mathf.Min(e3, Mathf.Min(e4, e5)));
+                        outCol = Blend(outCol, new Color(0.98f, 0.28f, 0.32f, 1f), Fill(heart));
+                        outCol = Blend(outCol, main, Fill(ecg));
+                        break;
+                    }
+                    case ControlIcon.HungerFork:
+                    {
+                        float handle = SdSegment(p, new Vector2(-0.42f, -0.46f), new Vector2(0.16f, 0.12f), 0.055f);
+                        float meat = SdCircle(p - new Vector2(0.22f, 0.20f), 0.28f);
+                        float boneTip = SdCircle(p - new Vector2(-0.46f, -0.48f), 0.09f);
+                        outCol = Blend(outCol, main, Fill(Mathf.Min(handle, boneTip)));
+                        outCol = Blend(outCol, warm, Fill(meat));
+                        break;
+                    }
+                    case ControlIcon.WaterDrop:
+                    {
+                        float bulb = SdCircle(p - new Vector2(0f, -0.14f), 0.34f);
+                        float tip = SdTriangle(p - new Vector2(0f, 0.22f), 0.30f, 0.44f);
+                        float shine = SdCircle(p - new Vector2(-0.10f, -0.10f), 0.09f);
+                        outCol = Blend(outCol, new Color(0.24f, 0.78f, 1.0f, 1f), Fill(Mathf.Min(bulb, tip)));
+                        outCol = Blend(outCol, main, Fill(shine) * 0.85f);
+                        break;
+                    }
+                    case ControlIcon.SanityEye:
+                    {
+                        float topArc = SdCircle(p - new Vector2(0f, -0.44f), 0.68f);
+                        float botArc = SdCircle(p - new Vector2(0f, 0.44f), 0.68f);
+                        float eyeShape = Mathf.Max(topArc, botArc);
+                        float iris = SdCircle(p, 0.22f);
+                        float pupil = SdCircle(p, 0.10f);
+                        outCol = Blend(outCol, main, Fill(eyeShape));
+                        outCol = Blend(outCol, new Color(0.68f, 0.42f, 0.96f, 1f), Fill(iris));
+                        outCol = Blend(outCol, new Color(0.06f, 0.05f, 0.10f, 1f), Fill(pupil));
+                        break;
+                    }
+                    case ControlIcon.Thermometer:
+                    {
+                        float stem = SdSegment(p, new Vector2(0f, -0.22f), new Vector2(0f, 0.44f), 0.12f);
+                        float bulb = SdCircle(p - new Vector2(0f, -0.30f), 0.22f);
+                        float mercStem = SdSegment(p, new Vector2(0f, -0.28f), new Vector2(0f, 0.24f), 0.055f);
+                        float mercBulb = SdCircle(p - new Vector2(0f, -0.30f), 0.13f);
+                        outCol = Blend(outCol, main, Fill(Mathf.Min(stem, bulb)));
+                        outCol = Blend(outCol, new Color(1.0f, 0.46f, 0.24f, 1f), Fill(Mathf.Min(mercStem, mercBulb)));
+                        break;
+                    }
+                    case ControlIcon.BookmarkPin:
+                    {
+                        float body = SdRoundBox(p - new Vector2(0f, 0.08f), new Vector2(0.28f, 0.44f), 0.05f);
+                        float notch = SdTriangle(p - new Vector2(0f, -0.38f), 0.28f, 0.24f);
+                        float tag = Mathf.Max(body, -notch);
+                        float star = SdCircle(p - new Vector2(0f, 0.14f), 0.10f);
+                        outCol = Blend(outCol, warm, Fill(tag));
+                        outCol = Blend(outCol, main, Fill(star));
+                        break;
+                    }
+                    case ControlIcon.UsersSquad:
+                    {
+                        float h1 = SdCircle(p - new Vector2(-0.18f, 0.24f), 0.16f);
+                        float b1 = SdRoundBox(p - new Vector2(-0.18f, -0.18f), new Vector2(0.24f, 0.20f), 0.10f);
+                        float h2 = SdCircle(p - new Vector2(0.24f, 0.16f), 0.13f);
+                        float b2 = SdRoundBox(p - new Vector2(0.24f, -0.22f), new Vector2(0.20f, 0.16f), 0.08f);
+                        outCol = Blend(outCol, accent, Fill(Mathf.Min(h2, b2)));
+                        outCol = Blend(outCol, main, Fill(Mathf.Min(h1, b1)));
+                        break;
+                    }
+                    case ControlIcon.SettingsGear:
+                    {
+                        float ring = Mathf.Abs(SdCircle(p, 0.30f)) - 0.11f;
+                        float t1 = SdRoundBox(p, new Vector2(0.52f, 0.10f), 0.03f);
+                        float t2 = SdRoundBox(p, new Vector2(0.10f, 0.52f), 0.03f);
+                        float t3 = SdRoundBox(Rot(p, 0.785f), new Vector2(0.50f, 0.10f), 0.03f);
+                        float t4 = SdRoundBox(Rot(p, 0.785f), new Vector2(0.10f, 0.50f), 0.03f);
+                        float gear = Mathf.Max(Mathf.Min(ring, Mathf.Min(Mathf.Min(t1, t2), Mathf.Min(t3, t4))), -SdCircle(p, 0.15f));
+                        outCol = Blend(outCol, steel, Fill(gear));
+                        break;
+                    }
+                    case ControlIcon.PlayArrow:
+                    {
+                        float tri = SdTriangle(Rot(p - new Vector2(0.06f, 0f), 1.5708f), 0.42f, 0.54f);
+                        outCol = Blend(outCol, main, Fill(tri));
                         break;
                     }
                 }
@@ -782,6 +1019,17 @@ public static class FragaProIconLibrary
                         float rib3 = SdSegment(p, new Vector2(-0.20f, -0.16f), new Vector2(0.20f, -0.16f), 0.045f);
                         outCol = Blend(outCol, new Color(0.46f, 0.30f, 0.18f, 1f), Fill(plate));
                         outCol = Blend(outCol, boneCol, Fill(Mathf.Min(rib1, Mathf.Min(rib2, rib3))));
+                        break;
+                    }
+                    case 314: // Funda Celta (couro + cordoes + pedra)
+                    {
+                        float cordL = SdSegment(p, new Vector2(-0.36f, -0.44f), new Vector2(-0.14f, 0.04f), 0.045f);
+                        float cordR = SdSegment(p, new Vector2(0.36f, -0.44f), new Vector2(0.14f, 0.04f), 0.045f);
+                        float pouch = SdRoundBox(p - new Vector2(0f, 0.16f), new Vector2(0.24f, 0.15f), 0.10f);
+                        float pebble = SdCircle(p - new Vector2(0f, 0.22f), 0.14f);
+                        outCol = Blend(outCol, wood, Fill(Mathf.Min(cordL, cordR)));
+                        outCol = Blend(outCol, new Color(0.54f, 0.34f, 0.18f, 1f), Fill(pouch));
+                        outCol = Blend(outCol, stone, Fill(pebble));
                         break;
                     }
                     case 401: // Armadilha

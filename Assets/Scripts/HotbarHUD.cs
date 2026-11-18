@@ -1,5 +1,6 @@
 ﻿using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.EventSystems;
 
 /// <summary>
 /// HotbarHUD: Barra rapida unificada de 6 slots + badges de Mao Esquerda e Armadura.
@@ -23,6 +24,13 @@ public class HotbarHUD : MonoBehaviour
     private Text offHandText;
     private Image armorIcon;
     private Text armorText;
+
+    private readonly RectTransform[] slotRects = new RectTransform[SLOT_COUNT];
+    private GameObject dragGhostObj;
+    private RectTransform dragGhostRect;
+    private Image dragGhostIcon;
+    private int dragSourceHotbarIndex = -1;
+    private int lastDragEndFrame = -1;
 
     private InventoryAdvanced inventoryCache;
 
@@ -59,6 +67,7 @@ public class HotbarHUD : MonoBehaviour
 
     private void Update()
     {
+        if (SurvivalInventoryCraftUI.Instance != null && SurvivalInventoryCraftUI.Instance.IsOpen) return;
         if (FragaInputRouter.Instance != null && FragaInputRouter.Instance.HotbarKeyPressedThisFrame >= 0)
         {
             int idx = FragaInputRouter.Instance.HotbarKeyPressedThisFrame;
@@ -72,11 +81,15 @@ public class HotbarHUD : MonoBehaviour
 
     private void BuildHotbarUI()
     {
-        Canvas canvas = GetComponentInParent<Canvas>() ?? FindAnyObjectByType<Canvas>();
+        Canvas canvas = HUDSurvivalOverlay.GetGameplayCanvas();
         if (canvas == null) return;
 
         Transform existing = canvas.transform.Find("HotbarHUD_Root");
-        if (existing != null) Destroy(existing.gameObject);
+        if (existing != null)
+        {
+            if (Application.isPlaying) Destroy(existing.gameObject);
+            else DestroyImmediate(existing.gameObject);
+        }
 
         GameObject rootObj = new GameObject("HotbarHUD_Root");
         rootObj.transform.SetParent(canvas.transform, false);
@@ -92,6 +105,18 @@ public class HotbarHUD : MonoBehaviour
         panelBg.type = Image.Type.Sliced;
         panelBg.color = new Color(0.04f, 0.06f, 0.09f, 0.72f);
         panelBg.raycastTarget = false;
+
+        GameObject topLine = new GameObject("TopAccentLine");
+        topLine.transform.SetParent(rootPanel, false);
+        RectTransform tlRT = topLine.AddComponent<RectTransform>();
+        tlRT.anchorMin = new Vector2(0.06f, 1f);
+        tlRT.anchorMax = new Vector2(0.94f, 1f);
+        tlRT.pivot = new Vector2(0.5f, 1f);
+        tlRT.offsetMin = new Vector2(0f, -2f);
+        tlRT.offsetMax = Vector2.zero;
+        Image tlImg = topLine.AddComponent<Image>();
+        tlImg.color = new Color(0.34f, 0.84f, 0.98f, 0.45f);
+        tlImg.raycastTarget = false;
 
         float slotSize = 68f;
         float gap = 8f;
@@ -112,6 +137,7 @@ public class HotbarHUD : MonoBehaviour
             rt.pivot = new Vector2(0.5f, 0.5f);
             rt.anchoredPosition = new Vector2(x, 0f);
             rt.sizeDelta = new Vector2(slotSize, slotSize);
+            slotRects[i] = rt;
 
             Image frame = slotObj.AddComponent<Image>();
             frame.sprite = FragaProIconLibrary.GetSlotFrameSprite();
@@ -127,9 +153,13 @@ public class HotbarHUD : MonoBehaviour
             Button btn = slotObj.AddComponent<Button>();
             btn.onClick.AddListener(() =>
             {
+                if (Time.frameCount == lastDragEndFrame || dragSourceHotbarIndex >= 0) return;
                 if (inventoryCache == null) inventoryCache = InventoryAdvanced.Instance;
                 if (inventoryCache != null) inventoryCache.UseHotbarSlot(slotIndex);
             });
+
+            HotbarSlotDragRelay dragRelay = slotObj.AddComponent<HotbarSlotDragRelay>();
+            dragRelay.Bind(this, slotIndex);
 
             // Icone vetorial
             GameObject icoObj = new GameObject("Icon");
@@ -204,6 +234,7 @@ public class HotbarHUD : MonoBehaviour
             dfRT.offsetMin = Vector2.zero;
             dfRT.offsetMax = Vector2.zero;
             Image dfImg = durFill.AddComponent<Image>();
+            dfImg.sprite = FragaProIconLibrary.GetBarFillSprite();
             dfImg.type = Image.Type.Filled;
             dfImg.fillMethod = Image.FillMethod.Horizontal;
             dfImg.color = new Color(0.35f, 0.92f, 0.45f, 1f);
@@ -214,8 +245,45 @@ public class HotbarHUD : MonoBehaviour
 
         // Mini-badges de Mao Esquerda e Armadura a direita da hotbar
         float gearX = startX + SLOT_COUNT * (slotSize + gap) + 18f;
+        GameObject divObj = new GameObject("GearSectionDivider");
+        divObj.transform.SetParent(rootPanel, false);
+        RectTransform dvRT = divObj.AddComponent<RectTransform>();
+        dvRT.anchorMin = new Vector2(0.5f, 0.5f);
+        dvRT.anchorMax = new Vector2(0.5f, 0.5f);
+        dvRT.anchoredPosition = new Vector2(gearX - 58f, 0f);
+        dvRT.sizeDelta = new Vector2(1.5f, 54f);
+        Image dvImg = divObj.AddComponent<Image>();
+        dvImg.color = new Color(0.36f, 0.74f, 0.92f, 0.36f);
+        dvImg.raycastTarget = false;
+
         CreateGearBadge(rootPanel, "OffHandBadge", new Vector2(gearX, 17f), font, out offHandIcon, out offHandText);
         CreateGearBadge(rootPanel, "ArmorBadge", new Vector2(gearX, -17f), font, out armorIcon, out armorText);
+
+        // Ghost de arraste para reordenar atalhos direto na Hotbar
+        dragGhostObj = new GameObject("HotbarDragGhost");
+        dragGhostObj.transform.SetParent(rootPanel, false);
+        dragGhostRect = dragGhostObj.AddComponent<RectTransform>();
+        dragGhostRect.sizeDelta = new Vector2(54f, 54f);
+        Image ghostBg = dragGhostObj.AddComponent<Image>();
+        ghostBg.sprite = FragaProIconLibrary.GetSlotFrameSprite();
+        ghostBg.type = Image.Type.Sliced;
+        ghostBg.color = new Color(0.12f, 0.34f, 0.46f, 0.90f);
+        ghostBg.raycastTarget = false;
+
+        GameObject gIcoObj = new GameObject("Icon");
+        gIcoObj.transform.SetParent(dragGhostObj.transform, false);
+        RectTransform giRT = gIcoObj.AddComponent<RectTransform>();
+        giRT.sizeDelta = new Vector2(40f, 40f);
+        dragGhostIcon = gIcoObj.AddComponent<Image>();
+        dragGhostIcon.preserveAspect = true;
+        dragGhostIcon.raycastTarget = false;
+        dragGhostObj.SetActive(false);
+    }
+
+    public RectTransform GetSlotRect(int hotbarIndex)
+    {
+        if (hotbarIndex < 0 || hotbarIndex >= slotRects.Length) return null;
+        return slotRects[hotbarIndex];
     }
 
     private void CreateGearBadge(Transform parent, string name, Vector2 pos, Font font, out Image iconImg, out Text labelTxt)
@@ -288,7 +356,7 @@ public class HotbarHUD : MonoBehaviour
                 // Durabilidade do primeiro slot desse item
                 ItemData data = ItemDatabase.GetItem(itemId);
                 int slotIdx = inventoryCache.FindFirstSlotIndex(itemId);
-                if (data != null && data.isPerishable && slotIdx >= 0 && data.maxDurability > 0f)
+                if (data != null && slotIdx >= 0 && data.maxDurability > 0f)
                 {
                     float frac = Mathf.Clamp01(inventoryCache.slots[slotIdx].durability / data.maxDurability);
                     slotDurabilityFills[i].transform.parent.gameObject.SetActive(true);
@@ -342,5 +410,92 @@ public class HotbarHUD : MonoBehaviour
                 armorText.text = "SEM PELE";
             }
         }
+    }
+
+    internal void HandleHotbarBeginDrag(int slotIndex, PointerEventData eventData)
+    {
+        if (inventoryCache == null) inventoryCache = InventoryAdvanced.Instance;
+        if (inventoryCache == null || slotIndex < 0 || slotIndex >= SLOT_COUNT) return;
+        int itemId = inventoryCache.hotbarItemIds[slotIndex];
+        if (itemId <= 0) return;
+
+        dragSourceHotbarIndex = slotIndex;
+        if (dragGhostObj != null)
+        {
+            dragGhostObj.SetActive(true);
+            dragGhostObj.transform.SetAsLastSibling();
+            if (dragGhostIcon != null) dragGhostIcon.sprite = FragaProIconLibrary.GetItemIcon(itemId);
+            UpdateGhostPos(eventData.position, eventData.pressEventCamera);
+        }
+    }
+
+    internal void HandleHotbarDrag(PointerEventData eventData)
+    {
+        if (dragSourceHotbarIndex < 0 || dragGhostObj == null) return;
+        UpdateGhostPos(eventData.position, eventData.pressEventCamera);
+
+        for (int i = 0; i < SLOT_COUNT; i++)
+        {
+            if (slotRects[i] == null || slotOutlines[i] == null) continue;
+            bool hit = RectTransformUtility.RectangleContainsScreenPoint(slotRects[i], eventData.position, eventData.pressEventCamera);
+            if (hit) slotOutlines[i].effectColor = new Color(0.45f, 1.0f, 0.72f, 0.98f);
+        }
+    }
+
+    internal void HandleHotbarEndDrag(PointerEventData eventData)
+    {
+        if (dragSourceHotbarIndex < 0) return;
+        lastDragEndFrame = Time.frameCount;
+        int fromIdx = dragSourceHotbarIndex;
+        dragSourceHotbarIndex = -1;
+        if (dragGhostObj != null) dragGhostObj.SetActive(false);
+
+        if (inventoryCache == null) inventoryCache = InventoryAdvanced.Instance;
+        if (inventoryCache != null)
+        {
+            int targetIdx = -1;
+            for (int i = 0; i < SLOT_COUNT; i++)
+            {
+                if (slotRects[i] != null && RectTransformUtility.RectangleContainsScreenPoint(slotRects[i], eventData.position, eventData.pressEventCamera))
+                {
+                    targetIdx = i;
+                    break;
+                }
+            }
+
+            if (targetIdx >= 0 && targetIdx != fromIdx)
+            {
+                inventoryCache.SwapHotbarSlots(fromIdx, targetIdx);
+            }
+            else if (targetIdx < 0 && rootPanel != null &&
+                     !RectTransformUtility.RectangleContainsScreenPoint(rootPanel, eventData.position, eventData.pressEventCamera))
+            {
+                inventoryCache.ClearHotbarSlot(fromIdx);
+                if (HUDSurvivalOverlay.Instance != null)
+                    HUDSurvivalOverlay.Instance.ShowLootTooltip($"Atalho [{fromIdx + 1}] removido.");
+            }
+        }
+
+        RefreshHotbar();
+    }
+
+    private void UpdateGhostPos(Vector2 screenPos, Camera eventCamera)
+    {
+        if (rootPanel == null || dragGhostRect == null) return;
+        if (RectTransformUtility.ScreenPointToLocalPointInRectangle(rootPanel, screenPos, eventCamera, out Vector2 localPt))
+        {
+            dragGhostRect.anchoredPosition = localPt;
+        }
+    }
+
+    private sealed class HotbarSlotDragRelay : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHandler
+    {
+        private HotbarHUD owner;
+        private int slotIndex;
+
+        public void Bind(HotbarHUD hud, int index) { owner = hud; slotIndex = index; }
+        public void OnBeginDrag(PointerEventData eventData) { if (owner != null) owner.HandleHotbarBeginDrag(slotIndex, eventData); }
+        public void OnDrag(PointerEventData eventData) { if (owner != null) owner.HandleHotbarDrag(eventData); }
+        public void OnEndDrag(PointerEventData eventData) { if (owner != null) owner.HandleHotbarEndDrag(eventData); }
     }
 }

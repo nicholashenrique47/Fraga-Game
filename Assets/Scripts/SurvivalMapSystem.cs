@@ -35,6 +35,14 @@ public class SurvivalMapSystem : MonoBehaviour
     private readonly Dictionary<string, Image> poiMarkersMini = new Dictionary<string, Image>();
     private readonly HashSet<string> discoveredPois = new HashSet<string>();
 
+    // Marcadores Zero-GC para esquadrao Co-op e Sinais (Pings) no Minimapa e Mapa Completo
+    private readonly Image[] coopMiniPips = new Image[FragaCoopSession.MaxPartySize];
+    private readonly Image[] coopFullPips = new Image[FragaCoopSession.MaxPartySize];
+    private readonly Text[] coopFullLabels = new Text[FragaCoopSession.MaxPartySize];
+    private readonly Image[] pingMiniPips = new Image[FragaCoopSession.MaxPartySize];
+    private readonly Image[] pingFullPips = new Image[FragaCoopSession.MaxPartySize];
+    private readonly Text[] pingFullLabels = new Text[FragaCoopSession.MaxPartySize];
+
     private string activeWaypointId = "farol";
     private float nextDiscoveryCheckTime = 0f;
     private bool uiBuilt = false;
@@ -78,39 +86,7 @@ public class SurvivalMapSystem : MonoBehaviour
 
     private Canvas FindGameplayCanvas()
     {
-        UIManager uiMgr = FindAnyObjectByType<UIManager>(FindObjectsInactive.Include);
-        if (uiMgr != null)
-        {
-            Canvas c = uiMgr.GetComponentInParent<Canvas>();
-            if (c != null) return c;
-        }
-
-        Canvas[] allCanvases = FindObjectsByType<Canvas>(FindObjectsInactive.Include);
-        foreach (var c in allCanvases)
-        {
-            if (c.isRootCanvas && c.GetComponent<MainMenuManager>() == null && c.gameObject.name.Contains("Mobile"))
-            {
-                return c;
-            }
-        }
-        foreach (var c in allCanvases)
-        {
-            if (c.isRootCanvas && c.GetComponent<MainMenuManager>() == null)
-            {
-                return c;
-            }
-        }
-
-        GameObject newCanvasObj = new GameObject("UI_Map_Canvas");
-        Canvas newCanvas = newCanvasObj.AddComponent<Canvas>();
-        newCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        newCanvas.sortingOrder = 55;
-        CanvasScaler cs = newCanvasObj.AddComponent<CanvasScaler>();
-        cs.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        cs.referenceResolution = new Vector2(1920, 1080);
-        cs.matchWidthOrHeight = 0.5f;
-        newCanvasObj.AddComponent<GraphicRaycaster>();
-        return newCanvas;
+        return HUDSurvivalOverlay.GetGameplayCanvas();
     }
 
     private static Sprite CreateArrowSprite()
@@ -176,7 +152,7 @@ public class SurvivalMapSystem : MonoBehaviour
         minimapPanel.anchorMin = new Vector2(1f, 1f);
         minimapPanel.anchorMax = new Vector2(1f, 1f);
         minimapPanel.pivot = new Vector2(1f, 1f);
-        minimapPanel.anchoredPosition = new Vector2(-25f, -74f);
+        minimapPanel.anchoredPosition = new Vector2(-20f, -74f);
         minimapPanel.sizeDelta = new Vector2(178f, 178f);
 
         Image frameBg = miniObj.AddComponent<Image>();
@@ -239,6 +215,32 @@ public class SurvivalMapSystem : MonoBehaviour
         mwImg.sprite = dotSprite;
         mwImg.color = new Color(1f, 0.85f, 0.2f, 0.95f);
         mwImg.raycastTarget = false;
+
+        // Marcadores de Aliados & Sinais Co-op no Minimapa (Zero-GC)
+        for (int i = 0; i < FragaCoopSession.MaxPartySize; i++)
+        {
+            GameObject cpObj = new GameObject($"MiniCoopPip_{i}");
+            cpObj.transform.SetParent(maskObj.transform, false);
+            RectTransform cpRT = cpObj.AddComponent<RectTransform>();
+            cpRT.anchorMin = new Vector2(0.5f, 0.5f); cpRT.anchorMax = new Vector2(0.5f, 0.5f);
+            cpRT.sizeDelta = new Vector2(11f, 11f);
+            Image cpImg = cpObj.AddComponent<Image>();
+            cpImg.sprite = dotSprite;
+            cpImg.raycastTarget = false;
+            cpImg.enabled = false;
+            coopMiniPips[i] = cpImg;
+
+            GameObject ppObj = new GameObject($"MiniPingPip_{i}");
+            ppObj.transform.SetParent(maskObj.transform, false);
+            RectTransform ppRT = ppObj.AddComponent<RectTransform>();
+            ppRT.anchorMin = new Vector2(0.5f, 0.5f); ppRT.anchorMax = new Vector2(0.5f, 0.5f);
+            ppRT.sizeDelta = new Vector2(15f, 15f);
+            Image ppImg = ppObj.AddComponent<Image>();
+            ppImg.sprite = dotSprite;
+            ppImg.raycastTarget = false;
+            ppImg.enabled = false;
+            pingMiniPips[i] = ppImg;
+        }
 
         // Seta do Jogador no centro do Minimapa
         GameObject arrowObj = new GameObject("Minimap_PlayerArrow");
@@ -410,6 +412,50 @@ public class SurvivalMapSystem : MonoBehaviour
         fwpImg.sprite = dotSprite;
         fwpImg.color = new Color(1f, 0.85f, 0.15f, 0.55f);
         fwpImg.raycastTarget = false;
+
+        // Marcadores Co-op (Aliados e Sinais Ping) no Mapa Completo
+        for (int i = 0; i < FragaCoopSession.MaxPartySize; i++)
+        {
+            GameObject fcObj = new GameObject($"FullCoopPip_{i}");
+            fcObj.transform.SetParent(fullMapObj.transform, false);
+            RectTransform fcRT = fcObj.AddComponent<RectTransform>();
+            fcRT.sizeDelta = new Vector2(14f, 14f);
+            Image fcImg = fcObj.AddComponent<Image>();
+            fcImg.sprite = dotSprite;
+            fcImg.raycastTarget = false;
+            fcObj.SetActive(false);
+            coopFullPips[i] = fcImg;
+
+            GameObject fclObj = new GameObject("Name");
+            fclObj.transform.SetParent(fcObj.transform, false);
+            RectTransform fclRT = fclObj.AddComponent<RectTransform>();
+            fclRT.anchoredPosition = new Vector2(0f, 13f); fclRT.sizeDelta = new Vector2(140f, 18f);
+            Text fclTxt = fclObj.AddComponent<Text>();
+            fclTxt.font = font; fclTxt.fontSize = 11; fclTxt.fontStyle = FontStyle.Bold;
+            fclTxt.alignment = TextAnchor.MiddleCenter; fclTxt.raycastTarget = false;
+            fclObj.AddComponent<Shadow>().effectColor = Color.black;
+            coopFullLabels[i] = fclTxt;
+
+            GameObject fpObj = new GameObject($"FullPingPip_{i}");
+            fpObj.transform.SetParent(fullMapObj.transform, false);
+            RectTransform fpRT = fpObj.AddComponent<RectTransform>();
+            fpRT.sizeDelta = new Vector2(20f, 20f);
+            Image fpImg = fpObj.AddComponent<Image>();
+            fpImg.sprite = dotSprite;
+            fpImg.raycastTarget = false;
+            fpObj.SetActive(false);
+            pingFullPips[i] = fpImg;
+
+            GameObject fplObj = new GameObject("PingLabel");
+            fplObj.transform.SetParent(fpObj.transform, false);
+            RectTransform fplRT = fplObj.AddComponent<RectTransform>();
+            fplRT.anchoredPosition = new Vector2(0f, 15f); fplRT.sizeDelta = new Vector2(150f, 18f);
+            Text fplTxt = fplObj.AddComponent<Text>();
+            fplTxt.font = font; fplTxt.fontSize = 11; fplTxt.fontStyle = FontStyle.Bold;
+            fplTxt.alignment = TextAnchor.MiddleCenter; fplTxt.color = new Color(0.45f, 0.96f, 1f); fplTxt.raycastTarget = false;
+            fplObj.AddComponent<Shadow>().effectColor = Color.black;
+            pingFullLabels[i] = fplTxt;
+        }
 
         // Seta do Jogador no Mapa Completo
         GameObject fArrObj = new GameObject("FullMap_PlayerArrow");
@@ -613,6 +659,52 @@ public class SurvivalMapSystem : MonoBehaviour
                     minimapWaypointPip.anchoredPosition = clamped;
                 }
             }
+
+            // Atualiza aliados e pings Co-op no Minimapa (Zero-GC)
+            FragaCoopSession coop = FragaCoopSession.Instance;
+            var members = coop != null ? coop.Members : null;
+            float now = Time.unscaledTime;
+            for (int i = 0; i < FragaCoopSession.MaxPartySize; i++)
+            {
+                Image cPip = coopMiniPips[i];
+                Image pPip = pingMiniPips[i];
+                bool hasMember = members != null && i < members.Count;
+                if (!hasMember)
+                {
+                    if (cPip != null) cPip.enabled = false;
+                    if (pPip != null) pPip.enabled = false;
+                    continue;
+                }
+
+                CoopMemberState m = members[i];
+                ColorUtility.TryParseHtmlString(m.colorHex, out Color mCol);
+                if (cPip != null)
+                {
+                    bool showAlly = !m.isLocalPlayer && m.isConnected;
+                    cPip.enabled = showAlly;
+                    if (showAlly)
+                    {
+                        float cdx = Mathf.Clamp((m.worldPosition.x - centerWorldX) * pxPerMeter, -halfBox, halfBox);
+                        float cdz = Mathf.Clamp((m.worldPosition.z - centerWorldZ) * pxPerMeter, -halfBox, halfBox);
+                        cPip.rectTransform.anchoredPosition = new Vector2(cdx, cdz);
+                        cPip.color = mCol;
+                    }
+                }
+                if (pPip != null)
+                {
+                    bool showPing = m.hasActivePing && now < m.activePingExpiresAt;
+                    pPip.enabled = showPing;
+                    if (showPing)
+                    {
+                        float pdx = Mathf.Clamp((m.activePingPosition.x - centerWorldX) * pxPerMeter, -halfBox, halfBox);
+                        float pdz = Mathf.Clamp((m.activePingPosition.z - centerWorldZ) * pxPerMeter, -halfBox, halfBox);
+                        pPip.rectTransform.anchoredPosition = new Vector2(pdx, pdz);
+                        float pScale = 0.85f + Mathf.Sin(now * 6f) * 0.25f;
+                        pPip.rectTransform.localScale = new Vector3(pScale, pScale, 1f);
+                        pPip.color = new Color(0.35f, 0.96f, 1f, 0.95f);
+                    }
+                }
+            }
         }
 
         if (minimapRegionText != null)
@@ -671,6 +763,63 @@ public class SurvivalMapSystem : MonoBehaviour
                 string name = known ? poi.DisplayName : "Local Inexplorado";
                 rTxt.text = $"{prefix}{name}\n<color=#B8C4CC>{dist:F0}m ({dir})</color>";
                 rTxt.color = isWp ? new Color(1f, 0.88f, 0.35f, 1f) : (known ? Color.white : new Color(0.70f, 0.74f, 0.78f, 0.9f));
+            }
+        }
+
+        // Atualiza aliados e pings Co-op no Mapa Completo
+        FragaCoopSession coopFull = FragaCoopSession.Instance;
+        var fullMembers = coopFull != null ? coopFull.Members : null;
+        float nowFull = Time.unscaledTime;
+        for (int i = 0; i < FragaCoopSession.MaxPartySize; i++)
+        {
+            Image cPip = coopFullPips[i];
+            Image pPip = pingFullPips[i];
+            bool hasMember = fullMembers != null && i < fullMembers.Count;
+            if (!hasMember)
+            {
+                if (cPip != null) cPip.gameObject.SetActive(false);
+                if (pPip != null) pPip.gameObject.SetActive(false);
+                continue;
+            }
+
+            CoopMemberState m = fullMembers[i];
+            ColorUtility.TryParseHtmlString(m.colorHex, out Color mCol);
+            if (cPip != null)
+            {
+                bool showAlly = !m.isLocalPlayer && m.isConnected;
+                cPip.gameObject.SetActive(showAlly);
+                if (showAlly)
+                {
+                    float anx = Mathf.Clamp01(m.worldPosition.x / FragaWorldBlueprint.Width);
+                    float anz = Mathf.Clamp01(m.worldPosition.z / FragaWorldBlueprint.Height);
+                    cPip.rectTransform.anchorMin = new Vector2(anx, anz);
+                    cPip.rectTransform.anchorMax = new Vector2(anx, anz);
+                    cPip.rectTransform.anchoredPosition = Vector2.zero;
+                    cPip.color = mCol;
+                    if (coopFullLabels[i] != null)
+                    {
+                        coopFullLabels[i].text = m.displayName;
+                        coopFullLabels[i].color = mCol;
+                    }
+                }
+            }
+            if (pPip != null)
+            {
+                bool showPing = m.hasActivePing && nowFull < m.activePingExpiresAt;
+                pPip.gameObject.SetActive(showPing);
+                if (showPing)
+                {
+                    float pnx = Mathf.Clamp01(m.activePingPosition.x / FragaWorldBlueprint.Width);
+                    float pnz = Mathf.Clamp01(m.activePingPosition.z / FragaWorldBlueprint.Height);
+                    pPip.rectTransform.anchorMin = new Vector2(pnx, pnz);
+                    pPip.rectTransform.anchorMax = new Vector2(pnx, pnz);
+                    pPip.rectTransform.anchoredPosition = Vector2.zero;
+                    float pScale = 1.0f + Mathf.Sin(nowFull * 6f) * 0.25f;
+                    pPip.rectTransform.localScale = new Vector3(pScale, pScale, 1f);
+                    pPip.color = new Color(0.30f, 0.96f, 1f, 0.72f);
+                    if (pingFullLabels[i] != null)
+                        pingFullLabels[i].text = $"[SINAL] {m.activePingLabel}";
+                }
             }
         }
     }
